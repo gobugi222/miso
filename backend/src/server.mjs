@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Snvr 백엔드 API - 스왑·믹싱 + 지갑(송금·받기) + 스너버메신저 연동.
  * Secret Network 연동: /wallet/link-secret, /balance(체인), /swap, /mix
  * DB: data/db.json (재시작 시 잔액·채팅 유지)

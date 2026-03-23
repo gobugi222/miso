@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Secret Network + SNVR 연동
  * SNIP-20 잔액, GhostSwap, Mixer
  */
@@ -100,6 +100,31 @@ export async function getSnvrBalance(address, viewingKey) {
     const msg = String(e?.message || "");
     if (msg.includes("viewing_key") || msg.includes("Wrong viewing key") || msg.includes("viewing key")) {
       throw new Error("VIEWING_KEY_INVALID");
+    }
+    return null;
+  }
+}
+
+/** SNIP-20 잔액 조회 (address + permit) */
+export async function getSnvrBalanceWithPermit(address, permit) {
+  const c = loadConfig();
+  if (!c.snvr_token || !c.snvr_code_hash) return null;
+  if (!permit || typeof permit !== "object") return null;
+  try {
+    const client = getQueryClient();
+    const result = await client.query.snip20.getBalance({
+      contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+      address: String(address).trim(),
+      auth: { permit },
+    });
+    const amount = result?.balance?.amount ?? "0";
+    return amount;
+  } catch (e) {
+    console.warn("getSnvrBalanceWithPermit error:", e?.message);
+    const msg = String(e?.message || "").toLowerCase();
+    // Invalid signature/params/revoked/permission errors should be surfaced clearly.
+    if (msg.includes("permit") || msg.includes("signature") || msg.includes("permission")) {
+      throw new Error("PERMIT_INVALID");
     }
     return null;
   }
