@@ -1176,7 +1176,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (b) b.textContent = r.ok ? r.data.balance : "?";
     }
     async function fetchWalletBalanceServerOnly(u) {
-      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
+      const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
+        "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
+      return api(q);
     }
     async function fetchWalletBalanceWithFallback(u) {
       const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
