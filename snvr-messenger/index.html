@@ -1594,13 +1594,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             /* keep null and continue strict checks below */
           }
         }
-        setCreds(secretAddress, viewingKey, permit);
         if (!viewingKey && !permit) {
           statusEl.textContent = "Could not finish wallet auth. Approve permit or provide viewing key, then try again.";
           statusEl.className = "error";
           setKeplrFlowStatus("error_no_auth");
           return;
         } else {
+          setCreds(secretAddress, viewingKey, permit);
           if (viewingKey) {
             const linkR = await syncServerWalletLink(secretAddress, viewingKey);
             if (!linkR.ok && !linkR.skipped) {
