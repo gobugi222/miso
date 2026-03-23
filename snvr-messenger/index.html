@@ -1081,6 +1081,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
       return { ok: res.ok, status: res.status, data };
     }
+    async function syncServerWalletLink(secretAddress, viewingKey) {
+      const u = getUser();
+      if (!u || !secretAddress || !viewingKey) return { ok: false, skipped: true };
+      return api("/wallet/link-secret", {
+        platform: u.platform,
+        platform_user_id: u.platform_user_id,
+        secret_address: secretAddress,
+        viewing_key: viewingKey,
+      });
+    }
     function myKey() {
       const u = getUser();
       return u ? u.platform + ":" + u.platform_user_id : "";
@@ -1591,6 +1601,15 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           setKeplrFlowStatus("error_no_auth");
           return;
         } else {
+          if (viewingKey) {
+            const linkR = await syncServerWalletLink(secretAddress, viewingKey);
+            if (!linkR.ok && !linkR.skipped) {
+              statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
+              statusEl.className = "error";
+              setKeplrFlowStatus("error_server_link_sync");
+              return;
+            }
+          }
           statusEl.textContent = viewingKey
             ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
             : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
