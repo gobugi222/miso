@@ -589,6 +589,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <p id="keplrMobileHint" class="search-hint" style="margin-top:8px;">
             Mobile note: In normal mobile browsers, Keplr extension is not detected. Use Keplr mobile dApp browser or desktop Chrome with Keplr extension. Address copy alone is not enough; viewing key is also required.
           </p>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+            <button type="button" id="btnOpenInKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open in Keplr</button>
+            <button type="button" id="btnCopyKeplrDeeplink" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy Keplr deeplink</button>
+          </div>
+          <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
           <label style="margin-top:10px;display:block;">Your address (secret1...)</label>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
@@ -601,16 +606,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <span id="badgeViewingKey" style="border:1px solid #58a6ff;color:#58a6ff;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Viewing key connected</span>
           </div>
           <details class="search-hint" style="margin-top:10px;">
-            <summary style="cursor:pointer;font-weight:600;">📋 Mobile manual link (address + viewing key)</summary>
+            <summary style="cursor:pointer;font-weight:600;">📋 Mobile manual link (address only or + viewing key)</summary>
             <p style="margin:8px 0 6px;line-height:1.55;">
-              If auto-connect is not available on mobile, paste both values manually.<br />
-              Address only is not enough — viewing key is required.
+              If auto-connect is not available on mobile, paste your Secret address manually.<br />
+              Viewing key is optional (recommended if available).
             </p>
             <label style="margin-top:6px;">Secret address</label>
             <input type="text" id="manualSecretAddress" placeholder="secret1..." style="font-family:monospace;font-size:0.82rem;" />
             <label style="margin-top:8px;">Viewing key</label>
             <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="font-family:monospace;font-size:0.82rem;" />
-            <button type="button" id="btnSaveManualWallet" class="secondary" style="margin-top:8px;">Save address + viewing key</button>
+            <button type="button" id="btnSaveManualWallet" class="secondary" style="margin-top:8px;">Save manual wallet link</button>
             <p id="manualWalletResult" class="search-hint hidden" style="margin-top:6px;"></p>
           </details>
         </div>
@@ -906,6 +911,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const q = new URLSearchParams(location.search);
       const fromInput = document.getElementById("apiUrl") ? document.getElementById("apiUrl").value : "";
       return (q.get("api") || fromInput || localStorage.getItem(API_URL_KEY) || DEFAULT_API_URL).replace(/\/$/, "");
+    }
+    function isTelegramInAppBrowser() {
+      var ua = String(navigator.userAgent || "");
+      return /Telegram/i.test(ua) || !!(window.Telegram && window.Telegram.WebApp);
+    }
+    function buildKeplrWebBrowserDeeplink() {
+      var target = "https://app.snvr.org";
+      try {
+        if (/^https?:/i.test(location.href)) target = location.href;
+      } catch (_e) { /* keep default */ }
+      return "https://deeplink.keplr.app/web-browser?url=" + encodeURIComponent(target);
     }
     /** Telegram Web App start_param / ?view= — maps to showView() names */
     function normalizeDeepLinkView(raw) {
@@ -1414,9 +1430,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const keplr = window.keplr;
         if (!keplr) {
           statusEl.textContent = isMobile
-            ? "Mobile browser cannot detect Keplr extension. Open this site in Keplr mobile dApp browser or desktop Chrome+Keplr."
+            ? "현재 브라우저에서는 Keplr가 감지되지 않습니다. (텔레그램/일반 모바일 브라우저 제한) 아래 'Mobile manual link'에 secret 주소만 입력하거나, Keplr dApp 브라우저에서 다시 시도하세요."
             : "Please install Keplr extension: https://www.keplr.app";
           statusEl.className = "error";
+          try {
+            var manual = document.getElementById("manualSecretAddress");
+            if (manual) manual.focus();
+          } catch (_e) { /* ignore */ }
           return;
         }
         const chainId = cfg.data.chain_id;
@@ -2269,6 +2289,50 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const input = document.getElementById("mySecretAddressInput");
       copyToClipboardSnvr(input ? input.value : "", "Wallet address copied.");
     };
+    var btnOpenInKeplr = document.getElementById("btnOpenInKeplr");
+    if (btnOpenInKeplr) btnOpenInKeplr.onclick = function () {
+      var link = buildKeplrWebBrowserDeeplink();
+      var hint = document.getElementById("keplrOpenHint");
+      if (hint) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#f7b955";
+      }
+      try {
+        window.location.href = link;
+      } catch (_e) {
+        /* ignore */
+      }
+      setTimeout(function () {
+        if (hint) {
+          hint.classList.remove("hidden");
+          hint.className = "search-hint";
+          hint.style.color = "#f7b955";
+          hint.textContent = "If Keplr did not open, use Telegram menu (⋮) -> Open in browser, then tap Open in Keplr again.";
+        }
+      }, 900);
+    };
+    var btnCopyKeplrDeeplink = document.getElementById("btnCopyKeplrDeeplink");
+    if (btnCopyKeplrDeeplink) btnCopyKeplrDeeplink.onclick = function () {
+      copyToClipboardSnvr(buildKeplrWebBrowserDeeplink(), "Keplr deeplink copied.");
+      var hint = document.getElementById("keplrOpenHint");
+      if (hint) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#f7b955";
+        hint.textContent = "Paste the deeplink in an external browser if Telegram in-app blocks opening Keplr.";
+      }
+    };
+    (function initKeplrOpenHint() {
+      var hint = document.getElementById("keplrOpenHint");
+      if (!hint) return;
+      if (isTelegramInAppBrowser()) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#f7b955";
+        hint.textContent = "Telegram in-app browser may block opening Keplr. If blocked, open this page in external browser first.";
+      }
+    })();
     var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
     if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
       var addrEl = document.getElementById("manualSecretAddress");
@@ -2283,16 +2347,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         resultEl.className = "error";
         return;
       }
-      if (!vkey || vkey.length < 8) {
-        resultEl.textContent = "Please paste a valid viewing key.";
-        resultEl.className = "error";
-        return;
-      }
       setCreds(addr, vkey);
       loadViewingKey();
       refreshWalletLinkStatusUi();
-      await syncBotBalanceIfEnabled(addr, vkey);
-      resultEl.textContent = "Saved locally. Wallet linked by manual input.";
+      if (vkey) await syncBotBalanceIfEnabled(addr, vkey);
+      resultEl.textContent = vkey
+        ? "Saved locally. Wallet linked with address + viewing key."
+        : "Saved locally. Wallet linked with address only.";
       resultEl.className = "success";
       if (addrEl) addrEl.value = "";
       if (keyEl) keyEl.value = "";
