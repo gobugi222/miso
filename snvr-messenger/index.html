@@ -606,9 +606,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
           <p id="keplrFlowStatus" class="search-hint" style="margin-top:4px;color:#58a6ff;">Flow status: idle</p>
           <p class="search-hint" style="margin-top:2px;opacity:0.8;">Build: 2026-03-23-keplr-flow-2</p>
-          <label style="margin-top:10px;display:block;">Your address (secret1...)</label>
+          <label style="margin-top:10px;display:block;">Your address (paste allowed)</label>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
-            <input type="text" id="mySecretAddressInput" readonly style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Shown after Keplr connects" />
+            <input type="text" id="mySecretAddressInput" style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Paste secret1... address here if needed" />
             <button type="button" id="btnCopyMySecretAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy</button>
           </div>
           <p id="walletLinkStatus" class="search-hint" style="margin-top:8px;">Wallet: not linked</p>
@@ -616,7 +616,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <span id="badgePermit" style="border:1px solid #7ee787;color:#7ee787;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Permit connected</span>
             <span id="badgeViewingKey" style="border:1px solid #58a6ff;color:#58a6ff;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Viewing key connected</span>
           </div>
-          <details class="search-hint" style="margin-top:10px;">
+          <details class="search-hint" style="margin-top:10px;" open>
             <summary style="cursor:pointer;font-weight:600;">📋 Mobile manual link (address only or + viewing key)</summary>
             <p style="margin:8px 0 6px;line-height:1.55;">
               If auto-connect is not available on mobile, paste your Secret address manually.<br />
@@ -2504,9 +2504,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
     if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
       var addrEl = document.getElementById("manualSecretAddress");
+      var topAddrEl = document.getElementById("mySecretAddressInput");
       var keyEl = document.getElementById("manualViewingKey");
       var resultEl = document.getElementById("manualWalletResult");
-      var addr = String(addrEl ? addrEl.value : "").trim();
+      var addr = String(addrEl ? addrEl.value : "").trim() || String(topAddrEl ? topAddrEl.value : "").trim();
       var vkey = String(keyEl ? keyEl.value : "").trim();
       if (!resultEl) return;
       resultEl.classList.remove("hidden");
@@ -2553,6 +2554,15 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (input) input.value = String(v).trim();
       }
     };
+    (function syncTopAddressInput() {
+      var top = document.getElementById("mySecretAddressInput");
+      var manual = document.getElementById("manualSecretAddress");
+      if (!top || !manual) return;
+      top.addEventListener("input", function () {
+        var v = String(top.value || "").trim();
+        if (v.startsWith("secret1")) manual.value = v;
+      });
+    })();
     (function enableInputPasteUX() {
       ["manualSecretAddress", "manualViewingKey", "linkCode"].forEach(function (id) {
         var el = document.getElementById(id);
