@@ -324,12 +324,15 @@ async function getEffectiveBalance(u) {
   if (u?.secret_address && u?.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
     if (chainBal != null) return Number(chainBal) / 1e9;
+    throw new Error("CHAIN_BALANCE_UNAVAILABLE");
   }
   return u?.balance ?? 0;
 }
 /** 메신저 Zero-Log: 클라이언트가 보낸 permit/viewing key로 잔액 조회 (저장 안 함). */
 async function getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fallbackU) {
+  let attemptedAuth = false;
   if (secret_address && permit) {
+    attemptedAuth = true;
     try {
       const chainBal = await getSnvrBalanceWithPermit(secret_address, permit);
       if (chainBal != null) return Number(chainBal) / 1e9;
@@ -339,6 +342,7 @@ async function getEffectiveBalanceFromCreds(secret_address, viewing_key, permit,
     }
   }
   if (secret_address && viewing_key) {
+    attemptedAuth = true;
     try {
       const chainBal = await getSnvrBalance(secret_address, viewing_key);
       if (chainBal != null) return Number(chainBal) / 1e9;
@@ -347,6 +351,7 @@ async function getEffectiveBalanceFromCreds(secret_address, viewing_key, permit,
       /* other errors: fall through to fallback */
     }
   }
+  if (attemptedAuth) throw new Error("CHAIN_BALANCE_UNAVAILABLE");
   return fallbackU ? getEffectiveBalance(fallbackU) : 0;
 }
 
@@ -415,6 +420,7 @@ app.post("/wallet/send", async (req, res) => {
   } catch (e) {
     if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
     if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+    if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
     throw e;
   }
   if (effective < numAmount) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "insufficient_balance") });
@@ -892,6 +898,7 @@ app.post("/swap", async (req, res) => {
       } catch (e) {
         if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
         if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+        if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
         throw e;
       }
       if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_swap") });
@@ -931,6 +938,7 @@ app.post("/swap", async (req, res) => {
     } catch (e) {
       if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
       if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
       throw e;
     }
     if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_swap") });
