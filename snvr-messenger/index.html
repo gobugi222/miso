@@ -592,6 +592,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
             <button type="button" id="btnOpenInKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open in Keplr</button>
             <button type="button" id="btnCopyKeplrDeeplink" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy Keplr deeplink</button>
+            <button type="button" id="btnCheckKeplrApproval" class="secondary" style="width:auto;padding:6px 12px;margin:0;">I approved in Keplr</button>
           </div>
           <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
@@ -683,6 +684,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const STORAGE_KEY = "snvr_messenger_user";
     const API_URL_KEY = "snvr_messenger_api_url";
     const CREDS_STORAGE_KEY = "snvr_messenger_creds";
+    const KEPLR_PENDING_KEY = "snvr_keplr_approval_pending";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
 
@@ -1489,6 +1491,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (isTelegramInAppBrowser()) {
           statusEl.textContent += "  You can return to Telegram now.";
         }
+        try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
         if (viewingKey) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
@@ -2305,10 +2308,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     if (btnOpenInKeplr) btnOpenInKeplr.onclick = function () {
       var link = buildKeplrWebBrowserDeeplink();
       var hint = document.getElementById("keplrOpenHint");
+      try { localStorage.setItem(KEPLR_PENDING_KEY, "1"); } catch (_e) { /* ignore */ }
       if (hint) {
         hint.classList.remove("hidden");
         hint.className = "search-hint";
         hint.style.color = "#f7b955";
+        hint.textContent = "Keplr opening... After approving in Keplr, return here and tap 'I approved in Keplr' if auto-connect does not start.";
       }
       try {
         window.location.href = link;
@@ -2345,12 +2350,19 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         hint.textContent = "Telegram in-app browser may block opening Keplr. If blocked, open this page in external browser first.";
       }
     })();
+    var btnCheckKeplrApproval = document.getElementById("btnCheckKeplrApproval");
+    if (btnCheckKeplrApproval) btnCheckKeplrApproval.onclick = function () {
+      var btn = document.getElementById("btnKeplrConnect");
+      if (btn) btn.click();
+    };
     (function autoConnectInKeplrBrowser() {
       try {
         var q = new URLSearchParams(location.search);
-        if (q.get("keplr_autoconnect") !== "1") return;
+        var fromQuery = q.get("keplr_autoconnect") === "1";
+        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
+        if (!fromQuery && !pending) return;
         if (!window.keplr) return;
-        if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1") return;
+        if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1" && !pending) return;
         sessionStorage.setItem("snvr_keplr_autoconnect_done", "1");
         setTimeout(function () {
           showView("settings");
