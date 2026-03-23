@@ -580,6 +580,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <p class="search-hint" style="color:#7ee787;font-weight:600;">✓ Viewing key stays on this device only — not stored on our servers.</p>
           <button type="button" id="btnKeplrConnect" class="primary" style="margin-top:8px">Connect Keplr</button>
           <button type="button" id="btnKeplrReconnect" class="secondary" style="margin-top:6px;width:auto;padding:6px 12px;">Reconnect Keplr</button>
+          <p id="keplrMobileHint" class="search-hint" style="margin-top:8px;">
+            Mobile note: In normal mobile browsers, Keplr extension is not detected. Use Keplr mobile dApp browser or desktop Chrome with Keplr extension. Address copy alone is not enough; viewing key is also required.
+          </p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
           <label style="margin-top:10px;display:block;">Your address (secret1...)</label>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
@@ -1001,6 +1004,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       document.getElementById("dashboard").classList.toggle("hidden", login);
       document.body.classList.toggle("dashboard-mode", !login);
       syncAppLayoutHeight();
+      enforceMobileScrollLayout();
       var h = document.getElementById("btnAddToHomeHeader");
       var m = document.getElementById("btnAddToHomeMobile");
       if (h) h.classList.toggle("hidden", login);
@@ -1264,6 +1268,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!viewName) return;
       if (viewName !== "send") sendTargetPlatformKey = null;
       showView(viewName);
+      enforceMobileScrollLayout();
       if (window.innerWidth <= 768) closeSidebarMobile();
     }
     (function initNav() {
@@ -1359,6 +1364,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     document.getElementById("btnKeplrConnect").onclick = async function () {
       const u = getUser();
       const statusEl = document.getElementById("keplrStatus");
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
       if (!u) { statusEl.textContent = "Please sign in first."; statusEl.classList.remove("hidden"); statusEl.className = "error"; return; }
       statusEl.classList.remove("hidden");
       statusEl.textContent = "Connecting...";
@@ -1372,7 +1378,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         }
         const keplr = window.keplr;
         if (!keplr) {
-          statusEl.textContent = "Please install Keplr. https://www.keplr.app";
+          statusEl.textContent = isMobile
+            ? "Mobile browser cannot detect Keplr extension. Open this site in Keplr mobile dApp browser or desktop Chrome+Keplr. Manual address copy alone will NOT work (viewing key required)."
+            : "Please install Keplr extension: https://www.keplr.app";
           statusEl.className = "error";
           return;
         }
@@ -1399,7 +1407,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           } catch (e2) { /* ignore */ }
         }
         if (!viewingKey) {
-          statusEl.textContent = "Add SNVR in Keplr and create a viewing key.";
+          statusEl.textContent = "Address alone is not enough. Add SNVR in Keplr and create a viewing key first.";
           statusEl.className = "error";
           return;
         }
@@ -2229,11 +2237,55 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         document.documentElement.style.setProperty("--app-height", appH + "px");
       } catch (_e) { /* ignore */ }
     }
+    function enforceMobileScrollLayout() {
+      try {
+        if (window.innerWidth > 768) return;
+        document.documentElement.style.height = "auto";
+        document.body.style.height = "auto";
+        document.body.style.overflowY = "auto";
+        document.body.style.overflowX = "hidden";
+        document.body.style.paddingBottom = "calc(96px + env(safe-area-inset-bottom))";
+        var app = document.querySelector(".app-wrap");
+        if (app) {
+          app.style.height = "auto";
+          app.style.overflow = "visible";
+          app.style.minHeight = "0";
+        }
+        var main = document.querySelector(".main-content");
+        if (main) {
+          main.style.overflowY = "visible";
+          main.style.overflowX = "hidden";
+          main.style.height = "auto";
+          main.style.minHeight = "calc(100dvh - 56px)";
+        }
+        var views = document.querySelectorAll(".view");
+        views.forEach(function (el) {
+          el.style.overflow = "visible";
+          el.style.maxHeight = "none";
+          el.style.height = "auto";
+        });
+        var cards = document.querySelectorAll("#viewSend .card, #viewSwap .card, #viewMix .card, #viewReceive .card, #viewSettings .card, .chat-list-pane .card, .chat-thread-pane .card");
+        cards.forEach(function (el) {
+          el.style.overflow = "visible";
+          el.style.maxHeight = "none";
+          el.style.height = "auto";
+        });
+        var txHistory = document.getElementById("txHistory");
+        if (txHistory) {
+          txHistory.style.maxHeight = "none";
+          txHistory.style.overflowY = "visible";
+        }
+      } catch (_e) { /* ignore */ }
+    }
     syncAppLayoutHeight();
+    enforceMobileScrollLayout();
     window.addEventListener("resize", syncAppLayoutHeight);
+    window.addEventListener("resize", enforceMobileScrollLayout);
     window.addEventListener("orientationchange", function () { setTimeout(syncAppLayoutHeight, 120); });
+    window.addEventListener("orientationchange", function () { setTimeout(enforceMobileScrollLayout, 140); });
     if (window.visualViewport && window.visualViewport.addEventListener) {
       window.visualViewport.addEventListener("resize", syncAppLayoutHeight);
+      window.visualViewport.addEventListener("resize", enforceMobileScrollLayout);
     }
 
     async function autoDetectBackend() {
@@ -2276,6 +2328,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     captureDeepLinkForSession();
     if (getUser()) showScreen(false);
     else { showScreen(true); autoDetectBackend(); }
+    setTimeout(enforceMobileScrollLayout, 30);
+    setTimeout(enforceMobileScrollLayout, 300);
 
     (function initChatMobileScroll() {
       var chatInput = document.getElementById("chatInput");
