@@ -33,7 +33,7 @@
     body.light { --text: #000; --muted: #666; --btn-bg: #f0f0f0; --btn-hover: #e0e0e0; }
 
     /* Telegram-style: sidebar + main */
-    .app-wrap { display: flex; height: 100vh; height: 100dvh; overflow: hidden; min-height: 0; }
+    .app-wrap { display: flex; height: var(--app-height, calc(100dvh - 64px)); overflow: hidden; min-height: 0; }
     .sidebar { width: 260px; min-width: 260px; background: var(--sidebar-bg, #17212b); color: #fff; display: flex; flex-direction: column; }
     body.light .sidebar { --sidebar-bg: #fff; color: #000; border-right: 1px solid #e0e0e0; }
     .sidebar-profile { padding: 20px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 12px; }
@@ -53,7 +53,7 @@
     .menu-item.active { background: rgba(42,171,238,0.2); font-weight: 600; }
     body.light .menu-item.active { background: #e8f4fd; }
     .menu-item .icon { width: 22px; text-align: center; font-size: 1.1rem; }
-    .main-content { flex: 1; overflow: auto; padding: 20px; background: var(--main-bg, #0e1621); display: flex; justify-content: center; }
+    .main-content { flex: 1; overflow: auto; padding: 20px; background: var(--main-bg, #0e1621); display: flex; justify-content: center; min-height: 0; }
     body.light .main-content { --main-bg: #e4ddd6; }
     .chat-messages { background: var(--chat-bg, #0e1621); }
     body.light .chat-messages { --chat-bg: #e4ddd6; }
@@ -105,6 +105,8 @@
     .msg .delete-btn:hover, .msg .copy-btn:hover { opacity: 1; }
     .header-logo-wrap { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border, #30363d); background: var(--card-bg, #161b22); }
     .header-logo-wrap img { height: 36px; width: auto; display: block; object-fit: contain; }
+    .header-home-trigger { display: inline-flex; align-items: center; gap: 12px; background: transparent; border: none; color: inherit; padding: 0; margin: 0; cursor: pointer; font: inherit; }
+    .header-home-trigger:focus { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 8px; }
     .header-add-home { margin-left: auto; padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; background: var(--primary, #2AABEE); color: #fff; border: none; cursor: pointer; font-weight: 600; white-space: nowrap; flex: 0 0 auto; width: max-content; }
     .header-add-home:hover { background: var(--primary-hover, #229ED9); }
     .header-add-home.hidden { display: none !important; }
@@ -148,7 +150,7 @@
       .main-content {
         width: 100%;
         padding: 12px 16px;
-        padding-bottom: calc(72px + env(safe-area-inset-bottom));
+        padding-bottom: calc(96px + env(safe-area-inset-bottom));
         display: flex;
         flex-direction: column;
         flex: 1;
@@ -218,6 +220,7 @@
       .view-title { font-size: 1.15rem; }
     }
     .btn-menu-toggle { display: none; }
+    .view { min-height: 0; padding-bottom: 6px; }
     @media (max-width: 768px) {
       body.dashboard-mode .btn-menu-toggle { display: flex !important; }
     }
@@ -230,8 +233,10 @@
 <body>
   <div class="header-logo-wrap safe-area-top">
     <button type="button" class="btn-menu-toggle" id="btnMenuToggle" data-i18n-aria="header.menuAria">☰</button>
-    <img src="snvr-messenger-logo.png?v=3" alt="SNVR Messenger" class="header-logo" />
-    <span style="font-size:1.25rem;font-weight:700;">SNVR Messenger</span>
+    <button type="button" id="btnHeaderHome" class="header-home-trigger" title="Go to home">
+      <img src="snvr-messenger-logo.png?v=3" alt="SNVR Messenger" class="header-logo" />
+      <span style="font-size:1.25rem;font-weight:700;">SNVR Messenger</span>
+    </button>
     <button type="button" class="header-add-home" id="btnAddToHomeHeader" data-i18n-title="header.addHomeTitle" data-i18n="header.addHome">📲 Add to home</button>
   </div>
 
@@ -965,6 +970,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       document.getElementById("loginScreen").classList.toggle("hidden", !login);
       document.getElementById("dashboard").classList.toggle("hidden", login);
       document.body.classList.toggle("dashboard-mode", !login);
+      syncAppLayoutHeight();
       var h = document.getElementById("btnAddToHomeHeader");
       var m = document.getElementById("btnAddToHomeMobile");
       if (h) h.classList.toggle("hidden", login);
@@ -1211,6 +1217,18 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       document.getElementById("sidebarOverlay").classList.toggle("open");
     };
     document.getElementById("sidebarOverlay").onclick = closeSidebarMobile;
+    var btnHeaderHome = document.getElementById("btnHeaderHome");
+    if (btnHeaderHome) btnHeaderHome.onclick = function () {
+      if (!getUser()) {
+        showScreen(true);
+        return;
+      }
+      goToView("chat");
+      try {
+        var listTop = document.getElementById("chatRoomList");
+        if (listTop) listTop.scrollIntoView({ block: "start", behavior: "smooth" });
+      } catch (_e) { /* ignore */ }
+    };
     var sendTargetPlatformKey = null;
     function goToView(viewName) {
       if (!viewName) return;
@@ -2171,6 +2189,22 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
 
     var codeParam = new URLSearchParams(location.search).get("code");
     if (codeParam && /^\d{6}$/.test(codeParam)) sessionStorage.setItem("snvr_send_code", codeParam);
+
+    function syncAppLayoutHeight() {
+      try {
+        var header = document.querySelector(".header-logo-wrap");
+        var headerH = header ? header.getBoundingClientRect().height : 0;
+        var viewportH = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+        var appH = Math.max(260, Math.floor(viewportH - headerH));
+        document.documentElement.style.setProperty("--app-height", appH + "px");
+      } catch (_e) { /* ignore */ }
+    }
+    syncAppLayoutHeight();
+    window.addEventListener("resize", syncAppLayoutHeight);
+    window.addEventListener("orientationchange", function () { setTimeout(syncAppLayoutHeight, 120); });
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      window.visualViewport.addEventListener("resize", syncAppLayoutHeight);
+    }
 
     async function autoDetectBackend() {
       var input = document.getElementById("apiUrl");
