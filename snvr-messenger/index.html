@@ -253,13 +253,9 @@
         <li data-i18n="login.qs4">Then Settings → Connect Keplr and Add SNVR to wallet</li>
       </ol>
     </details>
-    <details style="margin:0 0 14px;padding:10px 12px;background:var(--input-bg, rgba(255,255,255,0.04));border-radius:8px;font-size:0.82rem;color:var(--muted,#8b949e);">
-      <summary style="cursor:pointer;font-weight:600;color:var(--muted,#8b949e);" data-i18n="login.devSummary">Local developers</summary>
-      <p style="margin:10px 0 0;line-height:1.55;" data-i18n-html="login.devBody">Messenger: <code>npm start</code> (e.g. port 5000) · Backend: <code>node src/server.mjs</code> (e.g. port 3000). Opening <strong>file://</strong> may block API calls — use <code>http://localhost:…</code>.</p>
-    </details>
     <label for="apiUrl" data-i18n="login.apiUrl">API URL</label>
     <div style="display:flex;gap:8px;align-items:center;">
-      <input type="url" id="apiUrl" data-i18n-placeholder="login.apiUrlPlaceholder" placeholder="https://api.example.com or http://localhost:3000" inputmode="url" autocomplete="url" style="flex:1;" />
+      <input type="url" id="apiUrl" data-i18n-placeholder="login.apiUrlPlaceholder" placeholder="https://api.snvr.org" inputmode="url" autocomplete="url" style="flex:1;" />
       <button type="button" id="btnTestConnection" class="secondary" style="width:auto;padding:10px 14px;" data-i18n="login.testConnection">Test connection</button>
     </div>
     <p id="connectionTestResult" class="search-hint hidden" style="margin-top:4px;"></p>
@@ -622,6 +618,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const API_URL_KEY = "snvr_messenger_api_url";
     const CREDS_STORAGE_KEY = "snvr_messenger_creds";
     const LANG_KEY = "snvr_messenger_lang";
+    const DEFAULT_API_URL = "https://api.snvr.org";
 
     const I18N = {
       en: {
@@ -652,7 +649,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           qs4: "Then Settings → Connect Keplr and Add SNVR to wallet",
           devSummary: "Local developers",
           devBody: "Messenger: <code>npm start</code> (e.g. port 5000) · Backend: <code>node src/server.mjs</code> (e.g. port 3000). Opening <strong>file://</strong> may block API calls — use <code>http://localhost:…</code>.",
-          apiUrl: "API URL", apiUrlPlaceholder: "https://api.example.com or http://localhost:3000", testConnection: "Test connection",
+          apiUrl: "API URL", apiUrlPlaceholder: "https://api.snvr.org", testConnection: "Test connection",
           linkCodeLabel: "Link code (6 digits)", linkCodeHint: "Enter the digits from the bot. Spaces are stripped when pasting.", signIn: "Sign in",
         },
         chat: {
@@ -710,7 +707,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           qs4: "그다음 설정 → Keplr 연결 및 SNVR 지갑에 추가",
           devSummary: "로컬 개발자",
           devBody: "메신저: <code>npm start</code> (예: 5000) · 백엔드: <code>node src/server.mjs</code> (예: 3000). <strong>file://</strong>로 열면 API가 막힐 수 있습니다 — <code>http://localhost:…</code>를 사용하세요.",
-          apiUrl: "API URL", apiUrlPlaceholder: "https://api.example.com 또는 http://localhost:3000", testConnection: "연결 테스트",
+          apiUrl: "API URL", apiUrlPlaceholder: "https://api.snvr.org", testConnection: "연결 테스트",
           linkCodeLabel: "링크 코드 (6자리)", linkCodeHint: "봇에서 받은 숫자를 입력하세요. 붙여넣을 때 공백은 자동 제거됩니다.", signIn: "로그인",
         },
         chat: {
@@ -835,7 +832,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     function getApiUrl() {
       const q = new URLSearchParams(location.search);
       const fromInput = document.getElementById("apiUrl") ? document.getElementById("apiUrl").value : "";
-      return (q.get("api") || fromInput || localStorage.getItem(API_URL_KEY) || "http://localhost:3000").replace(/\/$/, "");
+      return (q.get("api") || fromInput || localStorage.getItem(API_URL_KEY) || DEFAULT_API_URL).replace(/\/$/, "");
     }
     /** Telegram Web App start_param / ?view= — maps to showView() names */
     function normalizeDeepLinkView(raw) {
@@ -1165,7 +1162,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
 
     document.getElementById("btnTestConnection").onclick = async function () {
-      const url = (document.getElementById("apiUrl").value || "http://localhost:3000").replace(/\/$/, "");
+      const url = (document.getElementById("apiUrl").value || DEFAULT_API_URL).replace(/\/$/, "");
       const el = document.getElementById("connectionTestResult");
       el.classList.remove("hidden");
       el.textContent = "Connecting...";
@@ -2182,7 +2179,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (q) { input.value = q.replace(/\/$/, ""); return; }
       var saved = localStorage.getItem(API_URL_KEY);
       if (saved) { input.value = saved.replace(/\/$/, ""); return; }
-      var candidates = [ "http://localhost:3000" ];
+      input.value = DEFAULT_API_URL;
+      var candidates = [ DEFAULT_API_URL ];
       if (location.hostname && location.hostname !== "localhost") {
         candidates.push(location.protocol + "//" + location.hostname + ":3000");
       }
