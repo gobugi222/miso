@@ -596,6 +596,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <button type="button" id="btnCopyMySecretAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy</button>
           </div>
           <p id="walletLinkStatus" class="search-hint" style="margin-top:8px;">Wallet: not linked</p>
+          <div id="walletAuthBadges" class="search-hint" style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span id="badgePermit" style="border:1px solid #7ee787;color:#7ee787;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Permit connected</span>
+            <span id="badgeViewingKey" style="border:1px solid #58a6ff;color:#58a6ff;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Viewing key connected</span>
+          </div>
           <details class="search-hint" style="margin-top:10px;">
             <summary style="cursor:pointer;font-weight:600;">📋 Mobile manual link (address + viewing key)</summary>
             <p style="margin:8px 0 6px;line-height:1.55;">
@@ -2200,7 +2204,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const creds = getCreds();
       const addrInput = document.getElementById("mySecretAddressInput");
       const statusEl = document.getElementById("walletLinkStatus");
+      const badgePermit = document.getElementById("badgePermit");
+      const badgeViewingKey = document.getElementById("badgeViewingKey");
       if (addrInput) addrInput.value = creds?.secret_address || "";
+      if (badgePermit) badgePermit.style.display = creds?.permit ? "inline-block" : "none";
+      if (badgeViewingKey) badgeViewingKey.style.display = creds?.viewing_key ? "inline-block" : "none";
       if (statusEl) {
         statusEl.textContent = hasWalletAuthCreds(creds)
           ? "Wallet: linked (" + maskSecretAddress(creds.secret_address) + ")"
