@@ -1171,10 +1171,20 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function refreshBalance() {
       const u = getUser();
       if (!u) return;
-      const body = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      const r = await api("/wallet/balance", body);
+      const r = await fetchWalletBalanceWithFallback(u);
       const b = document.getElementById("balance");
       if (b) b.textContent = r.ok ? r.data.balance : "?";
+    }
+    async function fetchWalletBalanceWithFallback(u) {
+      const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
+      let r = await api("/wallet/balance", primaryBody);
+      const authErr = r && !r.ok && (r.data?.error === "viewing_key_invalid" || r.data?.error === "permit_invalid");
+      if (!authErr) return r;
+      // Local auth may be stale while server-side link is valid (e.g. bot /balance works).
+      const c = getCreds();
+      if (c?.secret_address) setCreds(c.secret_address, "", null);
+      else clearCreds();
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
     }
 
     function profileAvatarUrl() {
@@ -1198,7 +1208,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
       Promise.all([
         api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
-        api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }))
+        fetchWalletBalanceWithFallback(u)
       ]).then(function (results) {
         const profileR = results[0];
         const balanceR = results[1];
