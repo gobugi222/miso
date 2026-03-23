@@ -1,0 +1,17 @@
+{
+  "ghostswap_token_code_id": 2501,
+  "ghostswap_token_code_hash": "0a2744c7003428be3eb9c03fbd73728459342324e59d613e5e23c1d37ffe76a1",
+  "ghostswap_factory_code_id": 2502,
+  "ghostswap_factory_address": "secret1j0dlzgg8fn83cm4fre3efdl22ywgp46sg55r3a",
+  "ghostswap_factory_code_hash": "96e2e8647dc18f08ff0e56e074bbf7582d16a8ce2b21720d3520d3c73326faca",
+  "ghostswap_pair_code_id": 2503,
+  "ghostswap_pair_code_hash": "6e34f6eb54f50ef0b515e19059dd9e51fe1e605d46f978b2fbf32e440699daf6",
+  "ghostswap_router_code_id": 2504,
+  "ghostswap_router_address": "secret1kcr3s86rfehq5cykpnpccdsgkcp5dzcjrmkq3g",
+  "ghostswap_router_code_hash": "ab8d67fa0a341dfe78a0c54c1e3b31ddf21e9271b609dda352ebbb6a7a14bb21",
+  "chain_id": "secret-4",
+  "deployed_at": "2026-03-20T07:37:32.142Z",
+  "scrt_snvr_pair_address": "secret13stxsjgx2vpujs845twzdfl8enh5cf2f2zmyhf",
+  "scrt_snvr_lp_token": "secret14z9auwdn7chfqnp7gxs6sy8wec29e8ky6ztnu6",
+  "pair_created_at": "2026-03-20T07:37:46.895Z"
+}
