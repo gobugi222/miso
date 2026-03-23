@@ -1171,9 +1171,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function refreshBalance() {
       const u = getUser();
       if (!u) return;
-      const r = await fetchWalletBalanceWithFallback(u);
+      const r = await fetchWalletBalanceServerOnly(u);
       const b = document.getElementById("balance");
       if (b) b.textContent = r.ok ? r.data.balance : "?";
+    }
+    async function fetchWalletBalanceServerOnly(u) {
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
     }
     async function fetchWalletBalanceWithFallback(u) {
       const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
@@ -1208,7 +1211,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
       Promise.all([
         api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
-        fetchWalletBalanceWithFallback(u)
+        fetchWalletBalanceServerOnly(u)
       ]).then(function (results) {
         const profileR = results[0];
         const balanceR = results[1];
