@@ -590,6 +590,19 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <button type="button" id="btnCopyMySecretAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy</button>
           </div>
           <p id="walletLinkStatus" class="search-hint" style="margin-top:8px;">Wallet: not linked</p>
+          <details class="search-hint" style="margin-top:10px;">
+            <summary style="cursor:pointer;font-weight:600;">📋 Mobile manual link (address + viewing key)</summary>
+            <p style="margin:8px 0 6px;line-height:1.55;">
+              If auto-connect is not available on mobile, paste both values manually.<br />
+              Address only is not enough — viewing key is required.
+            </p>
+            <label style="margin-top:6px;">Secret address</label>
+            <input type="text" id="manualSecretAddress" placeholder="secret1..." style="font-family:monospace;font-size:0.82rem;" />
+            <label style="margin-top:8px;">Viewing key</label>
+            <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="font-family:monospace;font-size:0.82rem;" />
+            <button type="button" id="btnSaveManualWallet" class="secondary" style="margin-top:8px;">Save address + viewing key</button>
+            <p id="manualWalletResult" class="search-hint hidden" style="margin-top:6px;"></p>
+          </details>
         </div>
         <details class="card" style="margin-top:12px;">
           <summary style="cursor:pointer;font-weight:600;padding:4px 0;">⚙️ Advanced</summary>
@@ -2192,6 +2205,34 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     document.getElementById("btnCopyMySecretAddress").onclick = function () {
       const input = document.getElementById("mySecretAddressInput");
       copyToClipboardSnvr(input ? input.value : "", "Wallet address copied.");
+    };
+    var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
+    if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
+      var addrEl = document.getElementById("manualSecretAddress");
+      var keyEl = document.getElementById("manualViewingKey");
+      var resultEl = document.getElementById("manualWalletResult");
+      var addr = String(addrEl ? addrEl.value : "").trim();
+      var vkey = String(keyEl ? keyEl.value : "").trim();
+      if (!resultEl) return;
+      resultEl.classList.remove("hidden");
+      if (!addr.startsWith("secret1")) {
+        resultEl.textContent = "Please enter a valid secret1... address.";
+        resultEl.className = "error";
+        return;
+      }
+      if (!vkey || vkey.length < 8) {
+        resultEl.textContent = "Please paste a valid viewing key.";
+        resultEl.className = "error";
+        return;
+      }
+      setCreds(addr, vkey);
+      loadViewingKey();
+      refreshWalletLinkStatusUi();
+      await syncBotBalanceIfEnabled(addr, vkey);
+      resultEl.textContent = "Saved locally. Wallet linked by manual input.";
+      resultEl.className = "success";
+      if (addrEl) addrEl.value = "";
+      if (keyEl) keyEl.value = "";
     };
     document.getElementById("botBalanceSyncToggle").onchange = async function () {
       const u = getUser();
