@@ -968,12 +968,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
     }
     function tryAutoReturnAfterConnect() {
-      setTimeout(function () {
-        try { window.history.back(); } catch (_e) { /* ignore */ }
-      }, 1200);
-      setTimeout(function () {
-        try { window.location.href = "tg://"; } catch (_e) { /* ignore */ }
-      }, 1800);
+      var hint = document.getElementById("keplrOpenHint");
+      if (hint) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#7ee787";
+        hint.textContent = "Connected. Return to SNVR Messenger app manually.";
+      }
     }
     async function pasteIntoInput(inputEl) {
       if (!inputEl) return;
