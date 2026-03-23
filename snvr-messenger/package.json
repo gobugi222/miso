@@ -1,0 +1,8 @@
+{
+  "name": "snvr-messenger",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "npx serve . -l 5000"
+  }
+}
