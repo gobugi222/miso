@@ -10,6 +10,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import {
   getSnvrBalance,
+  getSnvrBalanceWithPermit,
   sendSnvr,
   resolveRecipientToSecretAddress,
   isSecretEnabled,
@@ -270,23 +271,50 @@ app.get("/wallet/balance", async (req, res) => {
   return res.json({ ok: true, balance: u.balance, source: "memory" });
 });
 
-/** 메신저 Zero-Log: 클라이언트가 뷰키를 담아 보냄. 저장 안 함. */
+function parsePermitInput(rawPermit) {
+  if (!rawPermit) return null;
+  if (typeof rawPermit === "object") return rawPermit;
+  if (typeof rawPermit !== "string") return null;
+  try {
+    const parsed = JSON.parse(rawPermit);
+    return (parsed && typeof parsed === "object") ? parsed : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/** 메신저 Zero-Log: 클라이언트가 permit/viewing key를 담아 보냄. 저장 안 함. */
 app.post("/wallet/balance", async (req, res) => {
-  const { platform = "telegram", platform_user_id, secret_address, viewing_key } = req.body || {};
+  const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  // 1) permit 우선
+  if (secret_address && permit) {
+    try {
+      const chainBal = await getSnvrBalanceWithPermit(secret_address, permit);
+      if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "permit" });
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") {
+        return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 지갑에서 다시 서명해 주세요." });
+      }
+      throw e;
+    }
+  }
+  // 2) viewing key fallback
   if (secret_address && viewing_key) {
     try {
       const chainBal = await getSnvrBalance(secret_address, viewing_key);
-      if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain" });
+      if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "viewing_key" });
     } catch (e) {
       if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
       throw e;
     }
   }
+  // 3) 저장된 기존 링크(viewing key) fallback
   const u = ensureUser(platform, platform_user_id);
   if (u.secret_address && u.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
-    if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain" });
+    if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "stored_viewing_key" });
   }
   return res.json({ ok: true, balance: u.balance, source: "memory" });
 });
@@ -299,8 +327,17 @@ async function getEffectiveBalance(u) {
   }
   return u?.balance ?? 0;
 }
-/** 메신저 Zero-Log: 클라이언트가 보낸 뷰키로 잔액 조회 (저장 안 함). VIEWING_KEY_INVALID 시 throw */
-async function getEffectiveBalanceFromCreds(secret_address, viewing_key, fallbackU) {
+/** 메신저 Zero-Log: 클라이언트가 보낸 permit/viewing key로 잔액 조회 (저장 안 함). */
+async function getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fallbackU) {
+  if (secret_address && permit) {
+    try {
+      const chainBal = await getSnvrBalanceWithPermit(secret_address, permit);
+      if (chainBal != null) return Number(chainBal) / 1e9;
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") throw e;
+      /* other errors: fall through to fallback */
+    }
+  }
   if (secret_address && viewing_key) {
     try {
       const chainBal = await getSnvrBalance(secret_address, viewing_key);
@@ -314,7 +351,15 @@ async function getEffectiveBalanceFromCreds(secret_address, viewing_key, fallbac
 }
 
 /** Wallet-linked check: body creds first(Zero-Log), then stored link. */
-async function isWalletLinked(u, secret_address, viewing_key) {
+async function isWalletLinked(u, secret_address, viewing_key, permit) {
+  if (secret_address && permit) {
+    try {
+      const chainBal = await getSnvrBalanceWithPermit(secret_address, permit);
+      return chainBal != null;
+    } catch (_e) {
+      return false;
+    }
+  }
   if (secret_address && viewing_key) {
     try {
       const chainBal = await getSnvrBalance(secret_address, viewing_key);
@@ -327,12 +372,13 @@ async function isWalletLinked(u, secret_address, viewing_key) {
 }
 
 app.post("/wallet/send", async (req, res) => {
-  const { platform = "telegram", from_platform_user_id, to_platform_user_id, to_username, to_platform_key, to_one_time_code, amount, locale, secret_address, viewing_key } = req.body || {};
+  const { platform = "telegram", from_platform_user_id, to_platform_user_id, to_username, to_platform_key, to_one_time_code, amount, locale, secret_address, viewing_key, permit: rawPermit } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
   if (amount == null || amount <= 0) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, from_platform_user_id)), "amount_required") });
   const fromKey = platformKey(platform, from_platform_user_id);
   const fromU = ensureUser(platform, from_platform_user_id);
   if (locale && ["en", "ko", "ja"].includes(String(locale).toLowerCase())) fromU.locale = String(locale).toLowerCase();
-  const senderLinked = await isWalletLinked(fromU, secret_address, viewing_key);
+  const senderLinked = await isWalletLinked(fromU, secret_address, viewing_key, permit);
   if (!senderLinked) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "sender_wallet_required") });
   let toKey = null;
   let toWalletLinked = false;
@@ -459,11 +505,12 @@ app.post("/wallet/bot-balance-sync", (req, res) => {
 });
 
 app.post("/wallet/receive/generate", (req, res) => {
-  const { platform = "telegram", platform_user_id, locale, secret_address, viewing_key } = req.body || {};
+  const { platform = "telegram", platform_user_id, locale, secret_address, viewing_key, permit: rawPermit } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, platform_user_id)), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   if (locale && ["en", "ko", "ja"].includes(String(locale).toLowerCase())) u.locale = String(locale).toLowerCase();
-  return isWalletLinked(u, secret_address, viewing_key).then((linked) => {
+  return isWalletLinked(u, secret_address, viewing_key, permit).then((linked) => {
     if (!linked) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, platform_user_id)), "receive_code_wallet_required") });
     const code = String(Math.floor(100000 + Math.random() * 900000));
     oneTimeCodes.set(code, {
@@ -809,7 +856,8 @@ function resolveRecipientToUserKey(recipient, platform = "telegram") {
 
 // POST /swap — 고스트스왑. 보낸 금액에서 수수료 0.3% 차감, 나머지가 수령인에게 입금
 app.post("/swap", async (req, res) => {
-  const { amount, recipient, platform = "telegram", from_platform_user_id, secret_address, viewing_key } = req.body || {};
+  const { amount, recipient, platform = "telegram", from_platform_user_id, secret_address, viewing_key, permit: rawPermit } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
   const loc = getLocale(req, from_platform_user_id != null ? platformKey(platform, from_platform_user_id) : null);
   if (amount == null || amount <= 0 || !recipient) {
     return res.status(400).json({ ok: false, error: err(loc, "amount_recipient_required") });
@@ -826,8 +874,11 @@ app.post("/swap", async (req, res) => {
     if (toAddr) {
       let effective;
       try {
-        effective = (secret_address && viewing_key) ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, fromU) : (fromU ? await getEffectiveBalance(fromU) : 0);
+        effective = (secret_address && (viewing_key || permit))
+          ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+          : (fromU ? await getEffectiveBalance(fromU) : 0);
       } catch (e) {
+        if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
         if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
         throw e;
       }
@@ -862,8 +913,11 @@ app.post("/swap", async (req, res) => {
   if (from_platform_user_id != null) {
     let effective;
     try {
-      effective = (secret_address && viewing_key) ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, fromU) : await getEffectiveBalance(fromU);
+      effective = (secret_address && (viewing_key || permit))
+        ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+        : await getEffectiveBalance(fromU);
     } catch (e) {
+      if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
       if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
       throw e;
     }
