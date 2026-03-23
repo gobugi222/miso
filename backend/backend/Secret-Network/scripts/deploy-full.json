@@ -1,1 +1,12 @@
-
+{
+  "snvr_token": "secret1d6qvapy96q94etwlnc7j33dlzmenz4j70w3ew7",
+  "snvr_code_id": 2473,
+  "snvr_code_hash": "ff84f11b7639a1012126559dad4b41d5bf698b69657b09d7aea8483fe372c500",
+  "chain_id": "secret-4",
+  "deployed_at": "2026-03-20T04:00:03.526Z",
+  "mixer_address": "secret1xlk86ftw8ljfxr95y2eg28jetp8umfvkv8hf8j",
+  "mixer_code_id": 2507,
+  "mixer_code_hash": "39a7c0a41abc0f00cb7ccea95947bf805e1a37cea20cffdd43536c78be06e770",
+  "mixer_deployed_at": "2026-03-20T04:00:37.857Z",
+  "mixer_migrated_at": "2026-03-20T11:47:06.541Z"
+}
