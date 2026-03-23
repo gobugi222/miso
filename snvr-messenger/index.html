@@ -500,7 +500,7 @@
         <div class="card" id="walletSnvrCard">
           <h3 class="view-title" style="font-size:1rem">💎 Add SNVR to Keplr</h3>
           <p class="search-hint" style="margin-top:0">
-            SNIP-20 may not appear in token search. Contract + code hash below sync from backend <code style="font-size:0.85em;">/wallet/chain-config</code>.
+            SNIP-20 tokens may not appear in wallet search results. If SNVR does not appear, add it manually using the Contract address + Code hash below (synced from backend <code style="font-size:0.85em;">/wallet/chain-config</code>).
           </p>
           <p id="walletSnvrChainHint" class="search-hint" style="font-size:0.8rem;margin-bottom:8px;"></p>
           <label>SNVR contract address</label>
@@ -517,16 +517,21 @@
             <strong>Symbol</strong> SNVR · <strong>Decimals</strong> <span id="walletSnvrDecimals">9</span>
           </p>
           <details class="search-hint" style="margin-top:10px;">
-            <summary style="cursor:pointer;font-weight:600;">How to add in Keplr</summary>
+            <summary style="cursor:pointer;font-weight:600;">How to add SNVR (step-by-step)</summary>
             <ol style="margin:8px 0 0 16px;line-height:1.65;">
-              <li>Select <strong>Secret Network</strong> in Keplr (match Chain ID above)</li>
-              <li>Open <strong>Add custom token</strong></li>
-              <li>Paste the contract address (no extra spaces)</li>
-              <li>Name SNVR, symbol SNVR, decimals as shown · enter code hash if asked</li>
-              <li>Approve <strong>viewing key</strong> (<code style="font-size:0.85em;">set_viewing_key</code>) to see balance</li>
+              <li>Open wallet <strong>Settings</strong> and choose <strong>Add custom token</strong>.</li>
+              <li>Select <strong>Secret Network (secret-4)</strong>.</li>
+              <li>Search for SNVR. If it does not appear, continue with <strong>manual input</strong>.</li>
+              <li>Paste <strong>Contract address</strong> and <strong>Code hash</strong> from this page.</li>
+              <li>Confirm token metadata: <strong>Symbol = SNVR</strong>, <strong>Decimals = 9</strong>.</li>
+              <li>Create/approve a <strong>Viewing key</strong> for SNVR. Address only is not enough for balance/transfer features.</li>
+              <li>Keep a small <strong>SCRT</strong> balance for gas. Without SCRT, token registration or viewing-key tx can fail.</li>
             </ol>
           </details>
           <p id="walletSnvrLoadErr" class="search-hint hidden" style="color:#f85149;margin-top:8px;"></p>
+          <p class="search-hint" style="margin-top:8px;color:#f7b955;">
+            ⚠ If SNVR still does not appear, refresh/reopen your wallet app first, then re-check SCRT gas balance and viewing-key creation.
+          </p>
         </div>
         <div class="card">
           <h3 class="view-title" style="font-size:1rem">📌 Telegram bot — commands</h3>
@@ -1420,7 +1425,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           } catch (e2) { /* ignore */ }
         }
         if (!viewingKey) {
-          statusEl.textContent = "Address alone is not enough. Add SNVR in Keplr and create a viewing key first.";
+          statusEl.textContent = "Address alone is not enough. Add SNVR, then create a viewing key in your wallet. Keep some SCRT for gas.";
           statusEl.className = "error";
           return;
         }
