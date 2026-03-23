@@ -1101,10 +1101,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const vkR = await api("/wallet/viewing-key?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
       const vk = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
       if (!vk) return;
-      const c = getCreds();
-      if (!c || !c.secret_address || !c.viewing_key) {
-        setCreds(addr, vk);
-      }
+      // Always align local creds with server-linked wallet on startup.
+      setCreds(addr, vk);
     }
     function myKey() {
       const u = getUser();
@@ -1168,9 +1166,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         void hydrateCredsFromServer().then(function () {
           loadViewingKey();
           refreshWalletLinkStatusUi();
+          refreshBalance();
+          refreshProfileSidebar();
         }).catch(function () { /* ignore */ });
-        refreshBalance();
-        refreshProfileSidebar();
         var dashView = getDesiredViewFromBootstrap() || "chat";
         sessionStorage.removeItem("snvr_deeplink_view");
         showView(dashView);
