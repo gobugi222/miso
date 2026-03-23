@@ -1536,6 +1536,22 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           statusEl.className = "error";
           return;
         }
+        const prevCreds = getCreds();
+        if (prevCreds?.secret_address && prevCreds.secret_address !== secretAddress) {
+          const same = confirm(
+            "A different wallet address was detected in Keplr.\n\n" +
+            "Current linked: " + prevCreds.secret_address + "\n" +
+            "Keplr selected: " + secretAddress + "\n\n" +
+            "Switching can make balance appear as 0 if this account has no SNVR.\n\n" +
+            "Do you want to switch to the Keplr selected address?"
+          );
+          if (!same) {
+            statusEl.textContent = "Canceled. Keplr account address differs from your currently linked wallet.";
+            statusEl.className = "error";
+            setKeplrFlowStatus("cancel_address_mismatch");
+            return;
+          }
+        }
         let permit = null;
         statusEl.textContent = "Waiting permit approval...";
         try {
