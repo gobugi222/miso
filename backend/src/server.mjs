@@ -261,7 +261,7 @@ app.get("/wallet/balance", async (req, res) => {
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, platform_user_id)), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   if (locale && ["en", "ko", "ja"].includes(locale)) u.locale = locale;
-  if (u.bot_balance_sync && u.secret_address && u.viewing_key) {
+  if (u.secret_address && u.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
     if (chainBal != null) {
       const human = Number(chainBal) / 1e9;
