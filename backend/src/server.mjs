@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Snvr 백엔드 API - 스왑·믹싱 + 지갑(송금·받기) + 스너버메신저 연동.
  * Secret Network 연동: /wallet/link-secret, /balance(체인), /swap, /mix
  * DB: data/db.json (재시작 시 잔액·채팅 유지)
@@ -375,6 +375,7 @@ app.post("/wallet/send", async (req, res) => {
   const { platform = "telegram", from_platform_user_id, to_platform_user_id, to_username, to_platform_key, to_one_time_code, amount, locale, secret_address, viewing_key, permit: rawPermit } = req.body || {};
   const permit = parsePermitInput(rawPermit);
   if (amount == null || amount <= 0) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, from_platform_user_id)), "amount_required") });
+  const numAmount = Number(amount);
   const fromKey = platformKey(platform, from_platform_user_id);
   const fromU = ensureUser(platform, from_platform_user_id);
   if (locale && ["en", "ko", "ja"].includes(String(locale).toLowerCase())) fromU.locale = String(locale).toLowerCase();
@@ -406,15 +407,26 @@ app.post("/wallet/send", async (req, res) => {
   if (!toWalletLinked && !(toU.secret_address && toU.viewing_key)) {
     return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "recipient_wallet_required") });
   }
-  if (fromU.balance < amount) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "insufficient_balance") });
-  fromU.balance -= amount;
-  toU.balance += amount;
+  let effective;
+  try {
+    effective = (secret_address && (viewing_key || permit))
+      ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+      : await getEffectiveBalance(fromU);
+  } catch (e) {
+    if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+    if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+    throw e;
+  }
+  if (effective < numAmount) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "insufficient_balance") });
+  fromU.balance = effective;
+  fromU.balance -= numAmount;
+  toU.balance += numAmount;
   walletTxs.push({
     id: walletTxId++,
     type: "send",
     from_key: fromKey,
     to_key: toKey,
-    amount,
+    amount: numAmount,
     fee: 0,
     meta: { to_username: to_username || null, to_one_time_code: to_one_time_code || null },
     created_at: new Date().toISOString(),
@@ -422,7 +434,7 @@ app.post("/wallet/send", async (req, res) => {
   const senderName = fromU?.display_name || (fromU?.username ? "@" + fromU.username : fromU?.platform_user_id || "Someone");
   const recipientLocale = (toU?.locale || "en").toLowerCase().slice(0, 5);
   const lang = ["ko", "ja"].includes(recipientLocale) ? recipientLocale : "en";
-  const notifyText = SEND_NOTIFY_MSG[lang](senderName, amount);
+  const notifyText = SEND_NOTIFY_MSG[lang](senderName, numAmount);
   if (toPlatform === "telegram") {
     const sent = await notifyTelegram(toId, notifyText);
     if (!sent && TELEGRAM_BOT_TOKEN) console.warn("[송금알림] 텔레그램 전송 실패. chatId:", toId);
@@ -435,7 +447,7 @@ app.post("/wallet/send", async (req, res) => {
     room_id: rid,
     from_key: "system",
     text: notifyText,
-    meta: { type: "send", from_key: fromKey, to_key: toKey, amount },
+    meta: { type: "send", from_key: fromKey, to_key: toKey, amount: numAmount },
     created_at: new Date().toISOString(),
   };
   chatMessages.push(sysMsg);
