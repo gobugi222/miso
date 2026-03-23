@@ -16,6 +16,14 @@
     .card { background: var(--card-bg, #161b22); border: 1px solid var(--border, #30363d); border-radius: 10px; padding: 18px; margin-bottom: 14px; }
     input, button { width: 100%; padding: 10px 12px; margin: 6px 0; border-radius: 8px; border: 1px solid var(--border, #30363d); font-size: 1rem; }
     input { background: var(--input-bg, #0d1117); color: var(--text, #e6edf3); }
+    /* Keep text fields paste/select friendly on mobile webviews */
+    input, textarea {
+      user-select: text;
+      -webkit-user-select: text;
+      -webkit-touch-callout: default;
+      touch-action: auto;
+      pointer-events: auto;
+    }
     input:focus, button:focus { outline: 2px solid #58a6ff; outline-offset: 2px; }
     button.primary { background: var(--primary, #2AABEE); color: #fff; border: none; cursor: pointer; font-weight: 600; transition: background 0.2s; }
     button.primary:hover { background: var(--primary-hover, #229ED9); }
@@ -593,7 +601,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <button type="button" id="btnOpenInKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open in Keplr</button>
             <button type="button" id="btnCopyKeplrDeeplink" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy Keplr deeplink</button>
             <button type="button" id="btnCheckKeplrApproval" class="secondary" style="width:auto;padding:6px 12px;margin:0;">I approved in Keplr</button>
-            <button type="button" id="btnOpenTelegramAfterKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open Telegram</button>
           </div>
           <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
@@ -619,11 +626,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
               <input type="text" id="manualSecretAddress" placeholder="secret1..." style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
               <button type="button" id="btnPasteManualAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
+              <button type="button" id="btnEnterManualAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Enter</button>
             </div>
             <label style="margin-top:8px;">Viewing key</label>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
               <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
               <button type="button" id="btnPasteManualViewingKey" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
+              <button type="button" id="btnEnterManualViewingKey" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Enter</button>
             </div>
             <button type="button" id="btnSaveManualWallet" class="secondary" style="margin-top:8px;">Save manual wallet link</button>
             <p id="manualWalletResult" class="search-hint hidden" style="margin-top:6px;"></p>
@@ -2457,10 +2466,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var btn = document.getElementById("btnKeplrConnect");
       if (btn) btn.click();
     };
-    var btnOpenTelegramAfterKeplr = document.getElementById("btnOpenTelegramAfterKeplr");
-    if (btnOpenTelegramAfterKeplr) btnOpenTelegramAfterKeplr.onclick = function () {
-      try { window.location.href = "https://t.me"; } catch (_e) { /* ignore */ }
-    };
     (function autoConnectInKeplrBrowser() {
       try {
         var q = new URLSearchParams(location.search);
@@ -2528,10 +2533,42 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     if (btnPasteManualAddress) btnPasteManualAddress.onclick = function () {
       pasteIntoInput(document.getElementById("manualSecretAddress"));
     };
+    var btnEnterManualAddress = document.getElementById("btnEnterManualAddress");
+    if (btnEnterManualAddress) btnEnterManualAddress.onclick = function () {
+      var v = prompt("Enter secret address (secret1...)");
+      if (v != null) {
+        var input = document.getElementById("manualSecretAddress");
+        if (input) input.value = String(v).trim();
+      }
+    };
     var btnPasteManualViewingKey = document.getElementById("btnPasteManualViewingKey");
     if (btnPasteManualViewingKey) btnPasteManualViewingKey.onclick = function () {
       pasteIntoInput(document.getElementById("manualViewingKey"));
     };
+    var btnEnterManualViewingKey = document.getElementById("btnEnterManualViewingKey");
+    if (btnEnterManualViewingKey) btnEnterManualViewingKey.onclick = function () {
+      var v = prompt("Enter viewing key");
+      if (v != null) {
+        var input = document.getElementById("manualViewingKey");
+        if (input) input.value = String(v).trim();
+      }
+    };
+    (function enableInputPasteUX() {
+      ["manualSecretAddress", "manualViewingKey", "linkCode"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.setAttribute("autocomplete", "on");
+        el.setAttribute("autocapitalize", "off");
+        el.setAttribute("autocorrect", "off");
+        el.setAttribute("spellcheck", "false");
+        el.addEventListener("focus", function () {
+          try { this.style.webkitUserSelect = "text"; } catch (_e) { /* ignore */ }
+        });
+        el.addEventListener("contextmenu", function () {
+          /* allow native paste/select menu */
+        });
+      });
+    })();
     document.getElementById("botBalanceSyncToggle").onchange = async function () {
       const u = getUser();
       const status = document.getElementById("botBalanceSyncStatus");
