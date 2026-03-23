@@ -593,6 +593,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <button type="button" id="btnOpenInKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open in Keplr</button>
             <button type="button" id="btnCopyKeplrDeeplink" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy Keplr deeplink</button>
             <button type="button" id="btnCheckKeplrApproval" class="secondary" style="width:auto;padding:6px 12px;margin:0;">I approved in Keplr</button>
+            <button type="button" id="btnOpenTelegramAfterKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open Telegram</button>
           </div>
           <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
@@ -615,9 +616,15 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               Viewing key is optional (recommended if available).
             </p>
             <label style="margin-top:6px;">Secret address</label>
-            <input type="text" id="manualSecretAddress" placeholder="secret1..." style="font-family:monospace;font-size:0.82rem;" />
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="manualSecretAddress" placeholder="secret1..." style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
+              <button type="button" id="btnPasteManualAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
+            </div>
             <label style="margin-top:8px;">Viewing key</label>
-            <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="font-family:monospace;font-size:0.82rem;" />
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
+              <button type="button" id="btnPasteManualViewingKey" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
+            </div>
             <button type="button" id="btnSaveManualWallet" class="secondary" style="margin-top:8px;">Save manual wallet link</button>
             <p id="manualWalletResult" class="search-hint hidden" style="margin-top:6px;"></p>
           </details>
@@ -954,6 +961,23 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       setTimeout(function () {
         try { window.history.back(); } catch (_e) { /* ignore */ }
       }, 1200);
+      setTimeout(function () {
+        try { window.location.href = "tg://"; } catch (_e) { /* ignore */ }
+      }, 1800);
+    }
+    async function pasteIntoInput(inputEl) {
+      if (!inputEl) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const t = await navigator.clipboard.readText();
+          if (t && String(t).trim()) {
+            inputEl.value = String(t).trim();
+            return;
+          }
+        }
+      } catch (_e) { /* ignore */ }
+      const manual = prompt("Paste value here:");
+      if (manual != null) inputEl.value = String(manual).trim();
     }
     function setKeplrFlowStatus(text) {
       try { localStorage.setItem(KEPLR_FLOW_STATUS_KEY, String(text || "idle")); } catch (_e) { /* ignore */ }
@@ -2406,6 +2430,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var btn = document.getElementById("btnKeplrConnect");
       if (btn) btn.click();
     };
+    var btnOpenTelegramAfterKeplr = document.getElementById("btnOpenTelegramAfterKeplr");
+    if (btnOpenTelegramAfterKeplr) btnOpenTelegramAfterKeplr.onclick = function () {
+      try { window.location.href = "tg://"; } catch (_e) { /* ignore */ }
+      setTimeout(function () {
+        try { window.location.href = "https://t.me"; } catch (_e) { /* ignore */ }
+      }, 600);
+    };
     (function autoConnectInKeplrBrowser() {
       try {
         var q = new URLSearchParams(location.search);
@@ -2468,6 +2499,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       resultEl.className = "success";
       if (addrEl) addrEl.value = "";
       if (keyEl) keyEl.value = "";
+    };
+    var btnPasteManualAddress = document.getElementById("btnPasteManualAddress");
+    if (btnPasteManualAddress) btnPasteManualAddress.onclick = function () {
+      pasteIntoInput(document.getElementById("manualSecretAddress"));
+    };
+    var btnPasteManualViewingKey = document.getElementById("btnPasteManualViewingKey");
+    if (btnPasteManualViewingKey) btnPasteManualViewingKey.onclick = function () {
+      pasteIntoInput(document.getElementById("manualViewingKey"));
     };
     document.getElementById("botBalanceSyncToggle").onchange = async function () {
       const u = getUser();
