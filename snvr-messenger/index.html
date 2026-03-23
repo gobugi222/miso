@@ -2443,9 +2443,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         status.className = "error";
         return;
       }
-      toggle.checked = !!r.data.enabled;
+      toggle.checked = !!(r.data.enabled || r.data.has_secret_link);
       status.className = "search-hint";
-      status.textContent = r.data.enabled
+      status.textContent = (r.data.enabled || r.data.has_secret_link)
         ? "Current: ON (bot /balance uses on-chain)"
         : "Current: OFF (bot /balance uses app balance)";
     }
@@ -2498,6 +2498,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return;
       }
       setCreds(addr, vk);
+      const linkR = await syncServerWalletLink(addr, vk);
+      if (!linkR.ok && !linkR.skipped) {
+        statusEl.textContent = "Applied locally, but server link sync failed. Retry once.";
+        statusEl.className = "error";
+        return;
+      }
       loadViewingKey();
       refreshWalletLinkStatusUi();
       await syncBotBalanceIfEnabled(addr, vk);
@@ -2617,6 +2623,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return;
       }
       setCreds(addr, vkey);
+      const linkR = await syncServerWalletLink(addr, vkey);
+      if (!linkR.ok && !linkR.skipped) {
+        resultEl.textContent = "Saved locally, but server link sync failed. Retry once.";
+        resultEl.className = "error";
+        return;
+      }
       loadViewingKey();
       refreshWalletLinkStatusUi();
       await syncBotBalanceIfEnabled(addr, vkey);
