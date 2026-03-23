@@ -524,8 +524,9 @@
               <li>Search for SNVR. If it does not appear, continue with <strong>manual input</strong>.</li>
               <li>Paste <strong>Contract address</strong> and <strong>Code hash</strong> from this page.</li>
               <li>Confirm token metadata: <strong>Symbol = SNVR</strong>, <strong>Decimals = 9</strong>.</li>
+              <li>When signing token registration/viewing-key tx, approval may require gas. Without SCRT gas, the <strong>Approve</strong> button may be disabled.</li>
               <li>Create/approve a <strong>Viewing key</strong> for SNVR. Address only is not enough for balance/transfer features.</li>
-              <li>Keep a small <strong>SCRT</strong> balance for gas. Without SCRT, token registration or viewing-key tx can fail.</li>
+              <li>Open the transaction <strong>Details</strong> screen and check the execute message (<code>set_viewing_key</code>). Copy and save the viewing key safely, then paste it into this app.</li>
             </ol>
           </div>
           <p id="walletSnvrLoadErr" class="search-hint hidden" style="color:#f85149;margin-top:8px;"></p>
@@ -868,14 +869,26 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     function getCreds() {
       try { return JSON.parse(localStorage.getItem(CREDS_STORAGE_KEY)); } catch { return null; }
     }
-    function setCreds(secret_address, viewing_key) {
-      localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify({ secret_address, viewing_key }));
+    function setCreds(secret_address, viewing_key, permit) {
+      var prev = getCreds() || {};
+      var next = {
+        secret_address: secret_address || "",
+        viewing_key: viewing_key || "",
+        permit: permit === undefined ? (prev.permit || null) : (permit || null),
+      };
+      localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify(next));
     }
     function clearCreds() { localStorage.removeItem(CREDS_STORAGE_KEY); }
+    function hasWalletAuthCreds(c) {
+      return !!(c && c.secret_address && (c.viewing_key || c.permit));
+    }
     function bodyWithCreds(body) {
       const c = getCreds();
-      if (c && c.secret_address && c.viewing_key) {
-        return Object.assign({}, body, { secret_address: c.secret_address, viewing_key: c.viewing_key });
+      if (c && c.secret_address) {
+        var out = Object.assign({}, body, { secret_address: c.secret_address });
+        if (c.viewing_key) out.viewing_key = c.viewing_key;
+        if (c.permit) out.permit = c.permit;
+        return out;
       }
       return body;
     }
@@ -1397,7 +1410,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const keplr = window.keplr;
         if (!keplr) {
           statusEl.textContent = isMobile
-            ? "Mobile browser cannot detect Keplr extension. Open this site in Keplr mobile dApp browser or desktop Chrome+Keplr. Manual address copy alone will NOT work (viewing key required)."
+            ? "Mobile browser cannot detect Keplr extension. Open this site in Keplr mobile dApp browser or desktop Chrome+Keplr."
             : "Please install Keplr extension: https://www.keplr.app";
           statusEl.className = "error";
           return;
@@ -1413,6 +1426,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           statusEl.className = "error";
           return;
         }
+        let permit = null;
+        try {
+          permit = await createBalancePermit(keplr, chainId, secretAddress, snvrAddr);
+        } catch (_e) {
+          permit = null;
+        }
         let viewingKey = null;
         try {
           if (keplr.getSecret20ViewingKey) {
@@ -1424,17 +1443,19 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             if (keplr.getSecret20ViewingKey) viewingKey = await keplr.getSecret20ViewingKey(chainId, snvrAddr);
           } catch (e2) { /* ignore */ }
         }
-        if (!viewingKey) {
-          statusEl.textContent = "Address alone is not enough. Add SNVR, then create a viewing key in your wallet. Keep some SCRT for gas.";
+        if (!viewingKey && !permit) {
+          statusEl.textContent = "Could not get wallet auth. Sign permit in wallet or create a viewing key. Keep some SCRT for gas.";
           statusEl.className = "error";
           return;
         }
-        setCreds(secretAddress, viewingKey);
-        statusEl.textContent = "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (not sent to our servers)";
+        setCreds(secretAddress, viewingKey, permit);
+        statusEl.textContent = viewingKey
+          ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
+          : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
         statusEl.className = "success";
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        await syncBotBalanceIfEnabled(secretAddress, viewingKey);
+        if (viewingKey) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
         refreshProfileSidebar();
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
@@ -1651,6 +1672,33 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         mod?.default;
       if (!ctor) throw new Error("Failed to load SecretNetworkClient from secretjs.");
       return ctor;
+    }
+    async function createBalancePermit(keplr, chainId, signerAddress, tokenAddress) {
+      if (!keplr || !keplr.signAmino) return null;
+      const permitName = "snvr-balance-" + Date.now();
+      const signDoc = {
+        chain_id: chainId,
+        account_number: "0",
+        sequence: "0",
+        fee: { amount: [{ denom: "uscrt", amount: "0" }], gas: "1" },
+        msgs: [{
+          type: "query_permit",
+          value: {
+            permit_name: permitName,
+            allowed_tokens: [tokenAddress],
+            permissions: ["balance"],
+          },
+        }],
+        memo: "",
+      };
+      const signed = await keplr.signAmino(chainId, signerAddress, signDoc, {
+        preferNoSetFee: true,
+        preferNoSetMemo: true,
+      });
+      return {
+        params: signDoc.msgs[0].value,
+        signature: signed?.signature,
+      };
     }
     async function getMixClient() {
       const cfg = await api("/wallet/chain-config");
@@ -2154,10 +2202,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const statusEl = document.getElementById("walletLinkStatus");
       if (addrInput) addrInput.value = creds?.secret_address || "";
       if (statusEl) {
-        statusEl.textContent = creds?.secret_address && creds?.viewing_key
+        statusEl.textContent = hasWalletAuthCreds(creds)
           ? "Wallet: linked (" + maskSecretAddress(creds.secret_address) + ")"
           : "Wallet: not linked";
-        statusEl.style.color = creds?.secret_address && creds?.viewing_key ? "#7ee787" : "";
+        statusEl.style.color = hasWalletAuthCreds(creds) ? "#7ee787" : "";
       }
     }
     async function loadBotBalanceSync() {
@@ -2246,7 +2294,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const creds = getCreds();
       if (this.checked && !(creds && creds.secret_address && creds.viewing_key)) {
         this.checked = false;
-        status.textContent = "Connect Keplr in Settings first.";
+        status.textContent = "Viewing key is required for bot on-chain sync. Reconnect Keplr first.";
         status.className = "error";
         return;
       }
