@@ -937,6 +937,24 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       return "https://deeplink.keplr.app/web-browser?url=" + encodeURIComponent(target);
     }
+    async function withTimeout(promise, ms, timeoutLabel) {
+      let timer = null;
+      const t = new Promise(function (_resolve, reject) {
+        timer = setTimeout(function () {
+          reject(new Error(timeoutLabel || "TIMEOUT"));
+        }, Number(ms) || 10000);
+      });
+      try {
+        return await Promise.race([promise, t]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    function tryAutoReturnAfterConnect() {
+      setTimeout(function () {
+        try { window.history.back(); } catch (_e) { /* ignore */ }
+      }, 1200);
+    }
     function setKeplrFlowStatus(text) {
       try { localStorage.setItem(KEPLR_FLOW_STATUS_KEY, String(text || "idle")); } catch (_e) { /* ignore */ }
       var el = document.getElementById("keplrFlowStatus");
@@ -1461,9 +1479,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         }
         const chainId = cfg.data.chain_id;
         const snvrAddr = cfg.data.snvr_address;
-        await keplr.enable(chainId);
+        statusEl.textContent = "Requesting wallet access...";
+        await withTimeout(keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT");
         const signer = keplr.getOfflineSigner(chainId);
-        const accounts = await signer.getAccounts();
+        const accounts = await withTimeout(signer.getAccounts(), 12000, "KEPLR_ACCOUNT_TIMEOUT");
         const secretAddress = accounts[0]?.address;
         if (!secretAddress) {
           statusEl.textContent = "Could not get address from Keplr.";
@@ -1471,41 +1490,60 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           return;
         }
         let permit = null;
+        statusEl.textContent = "Waiting permit approval...";
         try {
-          permit = await createBalancePermit(keplr, chainId, secretAddress, snvrAddr);
+          permit = await withTimeout(
+            createBalancePermit(keplr, chainId, secretAddress, snvrAddr),
+            15000,
+            "PERMIT_TIMEOUT"
+          );
         } catch (_e) {
           permit = null;
         }
         let viewingKey = null;
+        statusEl.textContent = "Checking viewing key...";
         try {
           if (keplr.getSecret20ViewingKey) {
-            viewingKey = await keplr.getSecret20ViewingKey(chainId, snvrAddr);
+            viewingKey = await withTimeout(
+              keplr.getSecret20ViewingKey(chainId, snvrAddr),
+              8000,
+              "VIEWING_KEY_TIMEOUT"
+            );
           }
         } catch (e) {
           try {
-            if (keplr.suggestToken) await keplr.suggestToken(chainId, snvrAddr);
-            if (keplr.getSecret20ViewingKey) viewingKey = await keplr.getSecret20ViewingKey(chainId, snvrAddr);
+            if (keplr.suggestToken) await withTimeout(keplr.suggestToken(chainId, snvrAddr), 10000, "SUGGEST_TOKEN_TIMEOUT");
+            if (keplr.getSecret20ViewingKey) {
+              viewingKey = await withTimeout(
+                keplr.getSecret20ViewingKey(chainId, snvrAddr),
+                8000,
+                "VIEWING_KEY_TIMEOUT_RETRY"
+              );
+            }
           } catch (e2) { /* ignore */ }
         }
-        if (!viewingKey && !permit) {
-          statusEl.textContent = "Could not get wallet auth. Sign permit in wallet or create a viewing key. Keep some SCRT for gas.";
-          statusEl.className = "error";
-          return;
-        }
         setCreds(secretAddress, viewingKey, permit);
-        statusEl.textContent = viewingKey
-          ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
-          : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
-        statusEl.className = "success";
+        if (!viewingKey && !permit) {
+          statusEl.textContent = "Could not finish wallet auth. Approve permit or provide viewing key, then try again.";
+          statusEl.className = "error";
+          setKeplrFlowStatus("error_no_auth");
+          return;
+        } else {
+          statusEl.textContent = viewingKey
+            ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
+            : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
+          statusEl.className = "success";
+          setKeplrFlowStatus("connected");
+        }
         if (isTelegramInAppBrowser()) {
           statusEl.textContent += "  You can return to Telegram now.";
         }
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
-        setKeplrFlowStatus("connected");
         loadViewingKey();
         refreshWalletLinkStatusUi();
         if (viewingKey) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
         refreshProfileSidebar();
+        tryAutoReturnAfterConnect();
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
         statusEl.className = "error";
@@ -2417,13 +2455,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         resultEl.className = "error";
         return;
       }
+      if (!vkey || vkey.length < 8) {
+        resultEl.textContent = "Viewing key is required for strict mode. Paste a valid viewing key.";
+        resultEl.className = "error";
+        return;
+      }
       setCreds(addr, vkey);
       loadViewingKey();
       refreshWalletLinkStatusUi();
-      if (vkey) await syncBotBalanceIfEnabled(addr, vkey);
-      resultEl.textContent = vkey
-        ? "Saved locally. Wallet linked with address + viewing key."
-        : "Saved locally. Wallet linked with address only.";
+      await syncBotBalanceIfEnabled(addr, vkey);
+      resultEl.textContent = "Saved locally. Wallet linked with address + viewing key.";
       resultEl.className = "success";
       if (addrEl) addrEl.value = "";
       if (keyEl) keyEl.value = "";
