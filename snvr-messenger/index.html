@@ -1512,7 +1512,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           return;
         }
         const chainId = cfg.data.chain_id;
+        const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
         const snvrAddr = cfg.data.snvr_address;
+        const codeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
         statusEl.textContent = "Requesting wallet access...";
         await withTimeout(keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT");
         const signer = keplr.getOfflineSigner(chainId);
@@ -1555,6 +1557,31 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               );
             }
           } catch (e2) { /* ignore */ }
+        }
+        // If wallet doesn't expose viewing key retrieval on mobile, create one via tx and keep it locally.
+        if (!viewingKey && lcdUrl && codeHash) {
+          try {
+            statusEl.textContent = "Creating viewing key in wallet...";
+            const newKey = btoa(String.fromCharCode.apply(null, crypto.getRandomValues(new Uint8Array(32))));
+            const enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
+            const SecretNetworkClient = await loadSecretJsClientCtor();
+            const client = new SecretNetworkClient({
+              url: lcdUrl,
+              chainId: chainId,
+              wallet: signer,
+              walletAddress: secretAddress,
+              encryptionUtils: enigmaUtils || undefined,
+            });
+            await withTimeout(client.tx.snip20.setViewingKey({
+              sender: secretAddress,
+              contract_address: snvrAddr,
+              code_hash: codeHash,
+              msg: { set_viewing_key: { key: newKey } },
+            }, { gasLimit: 220_000 }), 25000, "SET_VIEWING_KEY_TIMEOUT");
+            viewingKey = newKey;
+          } catch (_e) {
+            /* keep null and continue strict checks below */
+          }
         }
         setCreds(secretAddress, viewingKey, permit);
         if (!viewingKey && !permit) {
