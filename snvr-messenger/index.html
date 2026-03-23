@@ -1550,6 +1550,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       el.className = r.ok ? "success" : "error";
       if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
       if (!r.ok && r.data?.error === "viewing_key_invalid") el.textContent += " Tap Settings → Reconnect Keplr.";
+      if (!r.ok && r.data?.error === "permit_invalid") el.textContent += " Tap Settings → Reconnect Keplr to sign a new permit.";
     };
 
     document.getElementById("btnReceive").onclick = async () => {
@@ -1587,6 +1588,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       el.className = r.ok ? "success" : "error";
       if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
       if (!r.ok && r.data?.error === "viewing_key_invalid") el.textContent += " Tap Settings → Reconnect Keplr.";
+      if (!r.ok && r.data?.error === "permit_invalid") el.textContent += " Tap Settings → Reconnect Keplr to sign a new permit.";
     };
 
     function setMixResult(text, ok) {
