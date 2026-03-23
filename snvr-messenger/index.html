@@ -919,8 +919,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     function buildKeplrWebBrowserDeeplink() {
       var target = "https://app.snvr.org";
       try {
-        if (/^https?:/i.test(location.href)) target = location.href;
-      } catch (_e) { /* keep default */ }
+        if (/^https?:/i.test(location.href)) {
+          var u = new URL(location.href);
+          u.searchParams.set("view", "settings");
+          u.searchParams.set("keplr_autoconnect", "1");
+          target = u.toString();
+        } else {
+          target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
+        }
+      } catch (_e) {
+        target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
+      }
       return "https://deeplink.keplr.app/web-browser?url=" + encodeURIComponent(target);
     }
     /** Telegram Web App start_param / ?view= — maps to showView() names */
@@ -1477,6 +1486,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
           : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
         statusEl.className = "success";
+        if (isTelegramInAppBrowser()) {
+          statusEl.textContent += "  You can return to Telegram now.";
+        }
         loadViewingKey();
         refreshWalletLinkStatusUi();
         if (viewingKey) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
@@ -2332,6 +2344,20 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         hint.style.color = "#f7b955";
         hint.textContent = "Telegram in-app browser may block opening Keplr. If blocked, open this page in external browser first.";
       }
+    })();
+    (function autoConnectInKeplrBrowser() {
+      try {
+        var q = new URLSearchParams(location.search);
+        if (q.get("keplr_autoconnect") !== "1") return;
+        if (!window.keplr) return;
+        if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1") return;
+        sessionStorage.setItem("snvr_keplr_autoconnect_done", "1");
+        setTimeout(function () {
+          showView("settings");
+          var btn = document.getElementById("btnKeplrConnect");
+          if (btn) btn.click();
+        }, 450);
+      } catch (_e) { /* ignore */ }
     })();
     var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
     if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
