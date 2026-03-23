@@ -57,7 +57,7 @@
     body.light .main-content { --main-bg: #e4ddd6; }
     .chat-messages { background: var(--chat-bg, #0e1621); }
     body.light .chat-messages { --chat-bg: #e4ddd6; }
-    .view { display: block; width: 100%; max-width: 980px; }
+    .view { display: block; width: 100%; max-width: 980px; min-height: 0; }
     .view-title { font-size: 1.35rem; margin: 0 0 16px; font-weight: 600; }
 
     #apiUrl { font-size: 0.85rem; }
@@ -130,11 +130,20 @@
 
     /* Mobile responsive */
     @media (max-width: 768px) {
+      html, body {
+        height: 100%;
+        overflow: hidden;
+      }
       .header-logo-wrap { padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); }
       .header-logo-wrap span { font-size: 1rem; }
       .header-logo-wrap img { height: 28px; }
       #loginScreen { margin: 12px !important; padding: 16px; max-width: 100%; }
-      .app-wrap { flex-direction: column; }
+      .app-wrap {
+        flex-direction: column;
+        height: var(--app-height, calc(100dvh - 56px));
+        min-height: 0;
+        overflow: hidden;
+      }
       .sidebar {
         position: fixed; top: 0; left: 0; bottom: 0; z-index: 1000;
         width: 280px; min-width: 280px;
@@ -158,6 +167,12 @@
         overflow-x: hidden;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: contain;
+        touch-action: pan-y;
+      }
+      .view {
+        min-height: 0;
+        padding-bottom: calc(14px + env(safe-area-inset-bottom));
       }
       #viewChat.view {
         flex: 1;
@@ -193,6 +208,7 @@
         max-height: none;
       }
       .chat-list-pane { width: 100%; min-width: 0; flex-shrink: 0; }
+      .chat-list-pane > .card { overflow: visible !important; max-height: none !important; }
       .chat-thread-pane {
         flex: 1;
         min-height: 0;
@@ -215,6 +231,10 @@
         overscroll-behavior: contain;
       }
       .chat-composer { flex-shrink: 0; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+      #txHistory { max-height: none !important; overflow: visible !important; }
+      #viewSend .card, #viewSwap .card, #viewMix .card, #viewReceive .card, #viewSettings .card {
+        overflow: visible !important;
+      }
       .card { padding: 14px; }
       input, button { padding: 12px 14px; min-height: 44px; }
       .view-title { font-size: 1.15rem; }
