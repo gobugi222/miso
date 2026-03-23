@@ -596,6 +596,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           </div>
           <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
+          <p id="keplrFlowStatus" class="search-hint" style="margin-top:4px;color:#58a6ff;">Flow status: idle</p>
+          <p class="search-hint" style="margin-top:2px;opacity:0.8;">Build: 2026-03-23-keplr-flow-2</p>
           <label style="margin-top:10px;display:block;">Your address (secret1...)</label>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
             <input type="text" id="mySecretAddressInput" readonly style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Shown after Keplr connects" />
@@ -685,6 +687,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const API_URL_KEY = "snvr_messenger_api_url";
     const CREDS_STORAGE_KEY = "snvr_messenger_creds";
     const KEPLR_PENDING_KEY = "snvr_keplr_approval_pending";
+    const KEPLR_FLOW_STATUS_KEY = "snvr_keplr_flow_status";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
 
@@ -933,6 +936,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
       }
       return "https://deeplink.keplr.app/web-browser?url=" + encodeURIComponent(target);
+    }
+    function setKeplrFlowStatus(text) {
+      try { localStorage.setItem(KEPLR_FLOW_STATUS_KEY, String(text || "idle")); } catch (_e) { /* ignore */ }
+      var el = document.getElementById("keplrFlowStatus");
+      if (el) el.textContent = "Flow status: " + String(text || "idle");
     }
     /** Telegram Web App start_param / ?view= — maps to showView() names */
     function normalizeDeepLinkView(raw) {
@@ -1431,6 +1439,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       statusEl.classList.remove("hidden");
       statusEl.textContent = "Connecting...";
       statusEl.className = "search-hint";
+      setKeplrFlowStatus("connecting");
       try {
         const cfg = await api("/wallet/chain-config");
         if (!cfg.ok || !cfg.data.snvr_address || !cfg.data.chain_id) {
@@ -1492,6 +1501,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           statusEl.textContent += "  You can return to Telegram now.";
         }
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
+        setKeplrFlowStatus("connected");
         loadViewingKey();
         refreshWalletLinkStatusUi();
         if (viewingKey) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
@@ -1499,6 +1509,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
         statusEl.className = "error";
+        setKeplrFlowStatus("error");
       }
     };
 
@@ -2309,6 +2320,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var link = buildKeplrWebBrowserDeeplink();
       var hint = document.getElementById("keplrOpenHint");
       try { localStorage.setItem(KEPLR_PENDING_KEY, "1"); } catch (_e) { /* ignore */ }
+      setKeplrFlowStatus("opened_keplr_link");
       if (hint) {
         hint.classList.remove("hidden");
         hint.className = "search-hint";
@@ -2352,6 +2364,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     })();
     var btnCheckKeplrApproval = document.getElementById("btnCheckKeplrApproval");
     if (btnCheckKeplrApproval) btnCheckKeplrApproval.onclick = function () {
+      setKeplrFlowStatus("manual_check_clicked");
       var btn = document.getElementById("btnKeplrConnect");
       if (btn) btn.click();
     };
@@ -2363,6 +2376,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (!fromQuery && !pending) return;
         if (!window.keplr) return;
         if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1" && !pending) return;
+        setKeplrFlowStatus("autoconnect_attempt");
         sessionStorage.setItem("snvr_keplr_autoconnect_done", "1");
         setTimeout(function () {
           showView("settings");
@@ -2371,6 +2385,24 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         }, 450);
       } catch (_e) { /* ignore */ }
     })();
+    (function restoreKeplrFlowStatus() {
+      try {
+        var s = localStorage.getItem(KEPLR_FLOW_STATUS_KEY) || "idle";
+        setKeplrFlowStatus(s);
+      } catch (_e) {
+        setKeplrFlowStatus("idle");
+      }
+    })();
+    window.addEventListener("pageshow", function () {
+      try {
+        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
+        if (pending && window.keplr) {
+          setKeplrFlowStatus("pageshow_recheck");
+          var btn = document.getElementById("btnKeplrConnect");
+          if (btn) btn.click();
+        }
+      } catch (_e) { /* ignore */ }
+    });
     var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
     if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
       var addrEl = document.getElementById("manualSecretAddress");
