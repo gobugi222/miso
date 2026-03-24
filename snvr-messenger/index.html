@@ -1729,15 +1729,24 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           return;
         }
         let permit = null;
-        statusEl.textContent = "Waiting permit approval...";
+        statusEl.textContent = "Waiting permit approval... (up to 45s)";
         try {
           permit = await withTimeout(
             createBalancePermit(keplr, chainId, secretAddress, snvrAddr),
-            15000,
+            45000,
             "PERMIT_TIMEOUT"
           );
         } catch (_e) {
-          permit = null;
+          // One retry: mobile wallet return can be slow.
+          try {
+            permit = await withTimeout(
+              createBalancePermit(keplr, chainId, secretAddress, snvrAddr),
+              45000,
+              "PERMIT_TIMEOUT_RETRY"
+            );
+          } catch (_e2) {
+            permit = null;
+          }
         }
         if (!permit) {
           statusEl.textContent = "Could not finish wallet auth. Permit approval is required.";
@@ -2056,7 +2065,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (linkedAddr && linkedAddr !== secretAddress) return false;
         const permit = await withTimeout(
           createBalancePermit(window.keplr, chainId, secretAddress, snvrAddr),
-          15000,
+          45000,
           "PERMIT_TIMEOUT_AUTO"
         );
         if (!permit) return false;
