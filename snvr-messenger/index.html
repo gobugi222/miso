@@ -654,6 +654,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
               <button type="button" id="btnToggleViewingKey" class="secondary" style="width:auto;margin-top:0;">Show</button>
               <button type="button" id="btnCopyViewingKey" class="secondary" style="width:auto;margin-top:0;">Copy</button>
+              <button type="button" id="btnClearViewingKey" class="secondary" style="width:auto;margin-top:0;">Clear viewing key</button>
               <button type="button" id="btnApplyViewingKeyNow" class="secondary" style="width:auto;margin-top:0;">Apply this key now</button>
             </div>
           </div>
@@ -2629,6 +2630,30 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     document.getElementById("btnCopyViewingKey").onclick = function () {
       const input = document.getElementById("viewingKeyInput");
       copyToClipboardSnvr(input ? input.value : "", "Viewing key copied.");
+    };
+    var btnClearViewingKey = document.getElementById("btnClearViewingKey");
+    if (btnClearViewingKey) btnClearViewingKey.onclick = async function () {
+      const statusEl = document.getElementById("manualWalletResult");
+      const u = getUser();
+      const c = getCreds();
+      if (!statusEl) return;
+      statusEl.classList.remove("hidden");
+      if (!u || !c?.secret_address) {
+        statusEl.textContent = "No linked wallet found.";
+        statusEl.className = "error";
+        return;
+      }
+      setCreds(c.secret_address, "", c.permit || null);
+      const linkR = await syncServerWalletLink(c.secret_address, "", c.permit || null);
+      if (!linkR.ok && !linkR.skipped) {
+        statusEl.textContent = "Local key cleared, but server update failed. Retry once.";
+        statusEl.className = "error";
+        return;
+      }
+      await loadViewingKey();
+      refreshWalletLinkStatusUi();
+      statusEl.textContent = "Viewing key cleared (local + server). Permit session kept.";
+      statusEl.className = "success";
     };
     var btnApplyViewingKeyNow = document.getElementById("btnApplyViewingKeyNow");
     if (btnApplyViewingKeyNow) btnApplyViewingKeyNow.onclick = async function () {
