@@ -1109,13 +1109,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const u = getUser();
       if (!u) return;
       const prev = getCreds() || {};
-      const syncR = await api("/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
-      if (!syncR.ok) return;
-      let addr = String(syncR.data?.secret_address || "").trim();
+      const q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
+      const [syncR, vkR] = await Promise.all([api("/wallet/bot-balance-sync?" + q), api("/wallet/viewing-key?" + q)]);
+      let addr = syncR.ok ? String(syncR.data?.secret_address || "").trim() : "";
       if (!addr) addr = String(prev.secret_address || "").trim();
       if (!addr) return;
-      const permitFromServer = syncR.data?.permit || null;
-      const vkR = await api("/wallet/viewing-key?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+      const permitFromServer = syncR.ok ? (syncR.data?.permit || null) : null;
       const vkServer = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
       const vk = vkServer || String(prev.viewing_key || "").trim();
       // Server may not store permit yet; never wipe locally signed permit when merging.
@@ -1219,13 +1218,20 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
     }
 
+    /** POST (local permit/vk) first; if invalid, fall back to GET (server-stored link for Telegram parity). */
+    async function fetchWalletBalanceForUi(u) {
+      const c = getCreds();
+      if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
+      let r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+      if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
+        r = await fetchWalletBalanceServerOnly(u);
+      }
+      return r;
+    }
     async function refreshBalance() {
       const u = getUser();
       if (!u) return;
-      const c = getCreds();
-      const r = hasWalletAuthCreds(c)
-        ? await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }))
-        : await fetchWalletBalanceServerOnly(u);
+      const r = await fetchWalletBalanceForUi(u);
       const b = document.getElementById("balance");
       if (b) b.textContent = r.ok ? r.data.balance : "?";
     }
@@ -1267,19 +1273,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
       Promise.all([
         api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
-        (function () {
-          const c = getCreds();
-          return hasWalletAuthCreds(c)
-            ? api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }))
-            : fetchWalletBalanceServerOnly(u);
-        })(),
+        fetchWalletBalanceForUi(u),
       ]).then(function (results) {
         const profileR = results[0];
         const balanceR = results[1];
         let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
         const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
-        if (!balanceR.ok && balanceR.data?.error === "viewing_key_invalid") {
-          if (balanceEl) { balanceEl.textContent = "Viewing key invalid — reconnect Keplr in Settings"; balanceEl.style.color = "#f85149"; }
+        if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
+          if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
         } else {
           if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
         }
