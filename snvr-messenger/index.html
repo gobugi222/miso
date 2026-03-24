@@ -2410,6 +2410,20 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         input.value = r.data.viewing_key;
         input.type = "password";
         if (btn) btn.textContent = "Show";
+        // Persist server-side viewing key into local creds so refresh does not "lose" key state.
+        const current = getCreds() || {};
+        let addr = String(current.secret_address || "").trim();
+        if (!addr) {
+          const addrInput = document.getElementById("mySecretAddressInput");
+          addr = String(addrInput?.value || "").trim();
+        }
+        if (!addr) {
+          const syncR = await api("/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+          if (syncR.ok) addr = String(syncR.data?.secret_address || "").trim();
+        }
+        if (addr) {
+          setCreds(addr, String(r.data.viewing_key || "").trim(), current.permit || null);
+        }
       } else {
         wrap.classList.add("hidden");
         none.classList.remove("hidden");
