@@ -947,7 +947,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!isPermitSessionValid(finalPermit)) finalPermit = null;
       var next = {
         secret_address: secret_address || "",
-        viewing_key: viewing_key || prev.viewing_key || "",
+        viewing_key: "",
         permit: finalPermit,
       };
       localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify(next));
@@ -960,13 +960,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       localStorage.removeItem(PERMIT_BACKUP_KEY);
     }
     function hasWalletAuthCreds(c) {
-      return !!(c && c.secret_address && (isPermitSessionValid(c.permit) || !!c.viewing_key));
+      return !!(c && c.secret_address && isPermitSessionValid(c.permit));
     }
     function bodyWithCreds(body) {
       const c = getCreds();
       if (c && c.secret_address) {
         var out = Object.assign({}, body, { secret_address: c.secret_address });
-        if (c.viewing_key) out.viewing_key = c.viewing_key;
         if (isPermitSessionValid(c.permit)) out.permit = c.permit;
         return out;
       }
@@ -1170,14 +1169,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const u = getUser();
       if (!u || !secretAddress) return { ok: false, skipped: true };
       const creds = getCreds();
-      const vk = viewingKey !== undefined && viewingKey !== null ? String(viewingKey).trim() : String(creds?.viewing_key || "").trim();
       const p = permit !== undefined ? permit : creds?.permit || null;
-      if (!p && !vk) return { ok: false, skipped: true };
+      if (!p) return { ok: false, skipped: true };
       return api("/wallet/link-secret", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         secret_address: secretAddress,
-        viewing_key: vk || "",
+        viewing_key: "",
         permit: p || null,
       });
     }
@@ -1186,16 +1184,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!u) return;
       const prev = getCreds() || {};
       const q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
-      const [syncR, vkR] = await Promise.all([api("/wallet/bot-balance-sync?" + q), api("/wallet/viewing-key?" + q)]);
+      const syncR = await api("/wallet/bot-balance-sync?" + q);
       let addr = syncR.ok ? String(syncR.data?.secret_address || "").trim() : "";
       if (!addr) addr = String(prev.secret_address || "").trim();
       if (!addr) return;
       const permitFromServer = syncR.ok ? (syncR.data?.permit || null) : null;
-      const vkServer = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
-      const vk = vkServer || String(prev.viewing_key || "").trim();
       const permit = permitFromServer || prev.permit || null;
-      if (permit || vk) {
-        setCreds(addr, vk, permit);
+      if (permit) {
+        setCreds(addr, "", permit);
       }
     }
     function myKey() {
@@ -1724,64 +1720,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         } catch (_e) {
           permit = null;
         }
-        let viewingKey = null;
-        statusEl.textContent = "Checking viewing key...";
-        try {
-          if (keplr.getSecret20ViewingKey) {
-            viewingKey = await withTimeout(
-              keplr.getSecret20ViewingKey(chainId, snvrAddr),
-              8000,
-              "VIEWING_KEY_TIMEOUT"
-            );
-          }
-        } catch (e) {
-          try {
-            if (keplr.suggestToken) await withTimeout(keplr.suggestToken(chainId, snvrAddr), 10000, "SUGGEST_TOKEN_TIMEOUT");
-            if (keplr.getSecret20ViewingKey) {
-              viewingKey = await withTimeout(
-                keplr.getSecret20ViewingKey(chainId, snvrAddr),
-                8000,
-                "VIEWING_KEY_TIMEOUT_RETRY"
-              );
-            }
-          } catch (e2) { /* ignore */ }
-        }
-        // If wallet doesn't expose viewing key retrieval on mobile, create one via tx and keep it locally.
-        if (!viewingKey && lcdUrl && codeHash) {
-          try {
-            statusEl.textContent = "Creating viewing key in wallet...";
-            const newKey = btoa(String.fromCharCode.apply(null, crypto.getRandomValues(new Uint8Array(32))));
-            const enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
-            const SecretNetworkClient = await loadSecretJsClientCtor();
-            const client = new SecretNetworkClient({
-              url: lcdUrl,
-              chainId: chainId,
-              wallet: signer,
-              walletAddress: secretAddress,
-              encryptionUtils: enigmaUtils || undefined,
-            });
-            await withTimeout(client.tx.snip20.setViewingKey({
-              sender: secretAddress,
-              contract_address: snvrAddr,
-              code_hash: codeHash,
-              msg: { set_viewing_key: { key: newKey } },
-            }, { gasLimit: 220_000 }), 25000, "SET_VIEWING_KEY_TIMEOUT");
-            viewingKey = newKey;
-          } catch (_e) {
-            /* keep null and continue strict checks below */
-          }
-        }
-        if (!viewingKey && !permit) {
-          statusEl.textContent = "Could not finish wallet auth. Approve permit or provide viewing key, then try again.";
+        if (!permit) {
+          statusEl.textContent = "Could not finish wallet auth. Permit approval is required.";
           statusEl.className = "error";
           setKeplrFlowStatus("error_no_auth");
           return;
         } else {
-          setCreds(secretAddress, viewingKey, permit);
-          if (viewingKey || permit) {
-            let linkR = await syncServerWalletLink(secretAddress, viewingKey, permit);
+          setCreds(secretAddress, "", permit);
+          if (permit) {
+            let linkR = await syncServerWalletLink(secretAddress, "", permit);
             if (!linkR.ok && !linkR.skipped) {
-              linkR = await syncServerWalletLink(secretAddress, viewingKey, permit);
+              linkR = await syncServerWalletLink(secretAddress, "", permit);
             }
             if (!linkR.ok && !linkR.skipped) {
               statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
@@ -1796,13 +1745,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             );
             if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
               // One more forced sync before continuing.
-              await syncServerWalletLink(secretAddress, viewingKey, permit);
-              await enableBotBalanceSyncOnServer(secretAddress, viewingKey, permit);
+              await syncServerWalletLink(secretAddress, "", permit);
+              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
             }
           }
-          statusEl.textContent = viewingKey
-            ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
-            : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
+          statusEl.textContent = "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready)";
           statusEl.className = "success";
           setKeplrFlowStatus("connected");
         }
@@ -1812,7 +1759,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        if (viewingKey || permit) await enableBotBalanceSyncOnServer(secretAddress, viewingKey, permit);
+        if (permit) await enableBotBalanceSyncOnServer(secretAddress, "", permit);
         refreshProfileSidebar();
         tryAutoReturnAfterConnect();
       } catch (e) {
@@ -2578,18 +2525,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const btn = document.getElementById("btnToggleViewingKey");
       if (!wrap || !input) return;
       let creds = getCreds();
-      if (!(creds && (creds.permit || creds.viewing_key))) {
+      if (!(creds && creds.permit)) {
         // On refresh, recover creds from server link first to prevent false "disconnected" state.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
         creds = getCreds();
-      }
-      if (creds && creds.viewing_key) {
-        wrap.classList.remove("hidden");
-        none.classList.add("hidden");
-        input.value = creds.viewing_key;
-        input.type = "password";
-        if (btn) btn.textContent = "Show";
-        return;
       }
       if (creds && creds.permit) {
         wrap.classList.remove("hidden");
@@ -2601,24 +2540,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (btn) btn.textContent = "Show";
         return;
       }
-      const r = await api("/wallet/viewing-key?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
-      if (r.ok && r.data.viewing_key) {
-        wrap.classList.remove("hidden");
-        none.classList.add("hidden");
-        input.value = String(r.data.viewing_key || "");
-        input.type = "password";
-        if (btn) btn.textContent = "Show";
-        const current = getCreds() || {};
-        let addr = String(current.secret_address || "").trim();
-        if (!addr) {
-          const addrInput = document.getElementById("mySecretAddressInput");
-          addr = String(addrInput?.value || "").trim();
-        }
-        if (addr) setCreds(addr, input.value, current.permit || null);
-      } else {
-        wrap.classList.add("hidden");
-        none.classList.remove("hidden");
-      }
+      wrap.classList.add("hidden");
+      none.classList.remove("hidden");
     }
     function refreshWalletLinkStatusUi() {
       const creds = getCreds();
@@ -2628,7 +2551,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const badgeViewingKey = document.getElementById("badgeViewingKey");
       if (addrInput) addrInput.value = creds?.secret_address || "";
       if (badgePermit) badgePermit.style.display = creds?.permit ? "inline-block" : "none";
-      if (badgeViewingKey) badgeViewingKey.style.display = creds?.viewing_key ? "inline-block" : "none";
+      if (badgeViewingKey) badgeViewingKey.style.display = "none";
       if (statusEl) {
         statusEl.textContent = hasWalletAuthCreds(creds)
           ? "Wallet: linked (" + maskSecretAddress(creds.secret_address) + ")"
@@ -2653,8 +2576,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const c = getCreds() || {};
         const addr = String(r.data?.secret_address || c.secret_address || "").trim();
         const permit = r.data?.permit || c.permit || null;
-        const vk = String(c.viewing_key || "").trim();
-        if (addr && (permit || vk)) setCreds(addr, vk, permit);
+        if (addr && permit) setCreds(addr, "", permit);
         // If user already has permit session, turn bot sync ON automatically (no manual checkbox tap).
         if (addr && permit && !r.data?.enabled) {
           const autoOnR = await api("/wallet/bot-balance-sync", {
@@ -2662,7 +2584,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             platform_user_id: u.platform_user_id,
             enabled: true,
             secret_address: addr,
-            viewing_key: vk || "",
+            viewing_key: "",
             permit: permit,
           });
           if (autoOnR.ok) toggle.checked = true;
@@ -2686,7 +2608,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         platform_user_id: u.platform_user_id,
         enabled: true,
         secret_address: secretAddress,
-        viewing_key: viewingKey || c?.viewing_key || "",
+        viewing_key: "",
         permit: p || null,
       });
       if (toggle) toggle.checked = !!r.ok;
@@ -2921,9 +2843,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const status = document.getElementById("botBalanceSyncStatus");
       if (!u || !status) return;
       const creds = getCreds();
-      if (this.checked && !(creds && creds.secret_address && (creds.permit || creds.viewing_key))) {
+      if (this.checked && !(creds && creds.secret_address && creds.permit)) {
         this.checked = false;
-        status.textContent = "Permit session or viewing key is required for bot on-chain sync. Reconnect Keplr first.";
+        status.textContent = "Permit session is required for bot on-chain sync. Reconnect Keplr first.";
         status.className = "error";
         return;
       }
@@ -2934,7 +2856,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         platform_user_id: u.platform_user_id,
         enabled: !!this.checked,
         secret_address: creds?.secret_address,
-        viewing_key: creds?.viewing_key || "",
+        viewing_key: "",
         permit: creds?.permit || null,
       });
       if (!r.ok) {
