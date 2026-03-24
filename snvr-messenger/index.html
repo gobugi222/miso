@@ -1108,17 +1108,20 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function hydrateCredsFromServer() {
       const u = getUser();
       if (!u) return;
+      const prev = getCreds() || {};
       const syncR = await api("/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
       if (!syncR.ok) return;
-      const addr = String(syncR.data?.secret_address || "").trim();
+      let addr = String(syncR.data?.secret_address || "").trim();
+      if (!addr) addr = String(prev.secret_address || "").trim();
       if (!addr) return;
       const permitFromServer = syncR.data?.permit || null;
       const vkR = await api("/wallet/viewing-key?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
-      const vk = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
-      if (vk) {
-        setCreds(addr, vk, permitFromServer || null);
-      } else if (permitFromServer) {
-        setCreds(addr, "", permitFromServer);
+      const vkServer = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
+      const vk = vkServer || String(prev.viewing_key || "").trim();
+      // Server may not store permit yet; never wipe locally signed permit when merging.
+      const permit = permitFromServer || prev.permit || null;
+      if (vk || permit) {
+        setCreds(addr, vk, permit);
       }
     }
     function myKey() {
@@ -1798,7 +1801,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       else if (/^\d{6}$/.test(to)) body.to_one_time_code = to;
       else body.to_username = to.replace(/^@/, "");
       const r = await api("/wallet/send", bodyWithCreds(body));
-      el.textContent = r.ok ? `✅ Sent. Balance: ${r.data.from_balance}` : (r.data?.message || r.data?.error || "Failed");
+      var failMsg = r.data?.message || r.data?.error || "Failed";
+      if (!r.ok && hasWalletAuthCreds(getCreds()) && /wallet|지갑|Keplr|linked|연결|sender|not connected/i.test(String(failMsg))) {
+        failMsg += " — If you just connected, open ⚙️ Settings and tap Connect Keplr once more.";
+      }
+      el.textContent = r.ok ? `✅ Sent. Balance: ${r.data.from_balance}` : failMsg;
       el.className = r.ok ? "success" : "error";
       if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
       if (!r.ok && r.data?.error === "viewing_key_invalid") el.textContent += " Tap Settings → Reconnect Keplr.";
