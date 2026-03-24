@@ -1317,11 +1317,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const c = getCreds();
       if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
       let r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+      let hadAuthFallback = false;
       if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
         // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
         r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
         if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
+          hadAuthFallback = true;
           r = await fetchWalletBalanceServerOnly(u);
         }
       }
@@ -1345,6 +1347,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           } catch (_e) { /* ignore */ }
         }
       }
+      if (hadAuthFallback && r?.ok && r?.data && !r.data.auth) r.data.auth = "auth_fallback";
       return r;
     }
     async function refreshBalance() {
@@ -2046,6 +2049,29 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function createBalancePermit(keplr, chainId, signerAddress, tokenAddress) {
       if (!keplr || !keplr.signAmino) return null;
       const permitName = "snvr-balance-" + Date.now();
+      // Prefer SecretJS helper when available.
+      try {
+        const mod = await import("https://esm.sh/secretjs@1.22.1");
+        const signFn = mod?.utils?.accessControl?.permit?.sign;
+        if (typeof signFn === "function") {
+          const p = await signFn(
+            signerAddress,
+            chainId,
+            permitName,
+            [tokenAddress],
+            ["owner", "balance"],
+            false
+          );
+          if (p && p.params && p.signature) {
+            const now2 = Date.now();
+            p.issued_at = now2;
+            p.expires_at = now2 + PERMIT_TTL_MS;
+            return p;
+          }
+        }
+      } catch (_eSignHelper) {
+        /* fallback to signAmino */
+      }
       const signDoc = {
         chain_id: chainId,
         account_number: "0",
