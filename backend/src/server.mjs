@@ -261,11 +261,15 @@ app.get("/wallet/balance", async (req, res) => {
   const locale = (req.query.locale || "en").toLowerCase().slice(0, 5);
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, platform_user_id)), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
+  const memBal = Number(u.balance || 0);
   if (locale && ["en", "ko", "ja"].includes(locale)) u.locale = locale;
   if (u.secret_address && u.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
     if (chainBal != null) {
       const human = Number(chainBal) / 1e9;
+      if (human === 0 && memBal > 0) {
+        return res.json({ ok: true, balance: memBal, source: "memory_fallback" });
+      }
       return res.json({ ok: true, balance: human, source: "chain" });
     }
   }
@@ -274,15 +278,16 @@ app.get("/wallet/balance", async (req, res) => {
       const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
+        if (human === 0 && memBal > 0) {
+          return res.json({ ok: true, balance: memBal, source: "memory_fallback" });
+        }
         return res.json({ ok: true, balance: human, source: "chain" });
       }
     } catch (e) {
-      if (e?.message === "PERMIT_INVALID") {
-        return res.status(400).json({ ok: false, error: "permit_invalid", message: "저장된 permit이 만료되었습니다. 메신저 설정에서 Keplr를 다시 연결해 주세요." });
-      }
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback" });
     }
   }
-  return res.json({ ok: true, balance: u.balance, source: "memory" });
+  return res.json({ ok: true, balance: memBal, source: "memory" });
 });
 
 function parsePermitInput(rawPermit) {
@@ -309,15 +314,19 @@ app.post("/wallet/balance", async (req, res) => {
   const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit } = req.body || {};
   const permit = parsePermitInput(rawPermit);
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  const u = ensureUser(platform, platform_user_id);
+  const memBal = Number(u.balance || 0);
   // 1) permit 우선
   if (secret_address && permit) {
     try {
       const chainBal = await getSnvrBalanceWithPermit(secret_address, permit);
-      if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "permit" });
-    } catch (e) {
-      if (e?.message === "PERMIT_INVALID") {
-        return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 지갑에서 다시 서명해 주세요." });
+      if (chainBal != null) {
+        const human = Number(chainBal) / 1e9;
+        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit" });
+        return res.json({ ok: true, balance: human, source: "chain", auth: "permit" });
       }
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit_invalid" });
       throw e;
     }
   }
@@ -325,29 +334,38 @@ app.post("/wallet/balance", async (req, res) => {
   if (secret_address && viewing_key) {
     try {
       const chainBal = await getSnvrBalance(secret_address, viewing_key);
-      if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "viewing_key" });
+      if (chainBal != null) {
+        const human = Number(chainBal) / 1e9;
+        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "viewing_key" });
+        return res.json({ ok: true, balance: human, source: "chain", auth: "viewing_key" });
+      }
     } catch (e) {
-      if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      if (e?.message === "VIEWING_KEY_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "viewing_key_invalid" });
       throw e;
     }
   }
   // 3) 저장된 기존 링크(permit 우선 → viewing key) fallback
-  const u = ensureUser(platform, platform_user_id);
   if (u.secret_address && u.permit) {
     try {
       const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
-      if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "stored_permit" });
-    } catch (e) {
-      if (e?.message === "PERMIT_INVALID") {
-        return res.status(400).json({ ok: false, error: "permit_invalid", message: "저장된 permit이 만료되었습니다. 메신저 설정에서 Keplr를 다시 연결해 주세요." });
+      if (chainBal != null) {
+        const human = Number(chainBal) / 1e9;
+        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "stored_permit" });
+        return res.json({ ok: true, balance: human, source: "chain", auth: "stored_permit" });
       }
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "stored_permit_invalid" });
     }
   }
   if (u.secret_address && u.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
-    if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "stored_viewing_key" });
+    if (chainBal != null) {
+      const human = Number(chainBal) / 1e9;
+      if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "stored_viewing_key" });
+      return res.json({ ok: true, balance: human, source: "chain", auth: "stored_viewing_key" });
+    }
   }
-  return res.json({ ok: true, balance: u.balance, source: "memory" });
+  return res.json({ ok: true, balance: memBal, source: "memory" });
 });
 
 /** 체인 연동 시 체인 잔액, 아니면 메모리 잔액 (mix/swap 잔액 검사용) */
