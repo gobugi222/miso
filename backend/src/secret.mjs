@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Secret Network + SNVR 연동
  * SNIP-20 잔액, GhostSwap, Mixer
  */
@@ -112,13 +112,51 @@ export async function getSnvrBalanceWithPermit(address, permit) {
   if (!permit || typeof permit !== "object") return null;
   try {
     const client = getQueryClient();
-    const result = await client.query.snip20.getBalance({
-      contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
-      address: String(address).trim(),
-      auth: { permit },
+    const target = String(address).trim();
+
+    // Path 1: secretjs SNIP-20 helper
+    try {
+      const r1 = await client.query.snip20.getBalance({
+        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+        address: target,
+        auth: { permit },
+      });
+      const a1 = r1?.balance?.amount;
+      if (a1 != null) return a1;
+    } catch (_e1) {
+      /* fall through to raw contract queries */
+    }
+
+    // Path 2: raw with_permit + balance{address}
+    try {
+      const r2 = await client.query.compute.queryContract({
+        contract_address: c.snvr_token,
+        code_hash: c.snvr_code_hash,
+        query: {
+          with_permit: {
+            permit,
+            query: { balance: { address: target } },
+          },
+        },
+      });
+      const a2 = r2?.balance?.amount;
+      if (a2 != null) return a2;
+    } catch (_e2) {
+      /* fall through to owner-style query */
+    }
+
+    // Path 3: raw with_permit + balance{} (owner implied by permit signer)
+    const r3 = await client.query.compute.queryContract({
+      contract_address: c.snvr_token,
+      code_hash: c.snvr_code_hash,
+      query: {
+        with_permit: {
+          permit,
+          query: { balance: {} },
+        },
+      },
     });
-    const amount = result?.balance?.amount ?? "0";
-    return amount;
+    return r3?.balance?.amount ?? "0";
   } catch (e) {
     console.warn("getSnvrBalanceWithPermit error:", e?.message);
     const msg = String(e?.message || "").toLowerCase();
