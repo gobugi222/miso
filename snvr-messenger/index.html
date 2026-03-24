@@ -1009,6 +1009,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!v && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe)
         v = normalizeDeepLinkView(window.Telegram.WebApp.initDataUnsafe.start_param);
       if (!v) v = normalizeDeepLinkView(sessionStorage.getItem("snvr_deeplink_view"));
+      // Same-tab refresh: restore last tab (deeplink takes priority above).
+      if (!v) v = normalizeDeepLinkView(sessionStorage.getItem("snvr_last_dashboard_view"));
       return v;
     }
     function captureDeepLinkForSession() {
@@ -1110,6 +1112,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
 
     function showView(name) {
+      try {
+        if (["chat", "send", "swap", "mix", "receive", "settings"].indexOf(name) >= 0)
+          sessionStorage.setItem("snvr_last_dashboard_view", name);
+      } catch (_e) { /* ignore */ }
       if (name !== "chat") clearChatPoll();
       ["chat", "send", "swap", "mix", "receive", "settings"].forEach(function (v) {
         var el = document.getElementById("view" + v.charAt(0).toUpperCase() + v.slice(1));
@@ -1163,19 +1169,24 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         su.textContent = u ? u.platform + ":" + u.platform_user_id : "-";
       }
       if (!login) {
-        void hydrateCredsFromServer().then(function () {
+        // Hydrate server-linked wallet before first paint of a tab so Settings doesn't show
+        // "viewing key disconnected" while creds are still syncing (race with loadViewingKey).
+        void (async function () {
+          try {
+            await hydrateCredsFromServer();
+          } catch (_e) { /* ignore */ }
           loadViewingKey();
           refreshWalletLinkStatusUi();
           refreshBalance();
           refreshProfileSidebar();
-        }).catch(function () { /* ignore */ });
-        var dashView = getDesiredViewFromBootstrap() || "chat";
-        sessionStorage.removeItem("snvr_deeplink_view");
-        showView(dashView);
-        applyFieldDeepLinks(dashView);
-        stripDeepLinkQueryFromUrl();
-        updateAddToHomeVisibility();
-        void refreshMixPending();
+          var dashView = getDesiredViewFromBootstrap() || "chat";
+          sessionStorage.removeItem("snvr_deeplink_view");
+          showView(dashView);
+          applyFieldDeepLinks(dashView);
+          stripDeepLinkQueryFromUrl();
+          updateAddToHomeVisibility();
+          void refreshMixPending();
+        })();
       }
       var nm = document.getElementById("nightMode");
       if (nm) {
@@ -2403,6 +2414,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (btn) btn.textContent = "Show";
         return;
       }
+      if (creds && creds.permit && !creds.viewing_key) {
+        wrap.classList.remove("hidden");
+        none.classList.add("hidden");
+        input.value = "(permit — balance queries do not use a stored viewing key)";
+        input.type = "text";
+        if (btn) btn.textContent = "Show";
+        return;
+      }
       const r = await api("/wallet/viewing-key?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
       if (r.ok && r.data.viewing_key) {
         wrap.classList.remove("hidden");
@@ -2424,6 +2443,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (addr) {
           setCreds(addr, String(r.data.viewing_key || "").trim(), current.permit || null);
         }
+      } else if (creds && creds.permit) {
+        wrap.classList.remove("hidden");
+        none.classList.add("hidden");
+        input.value = "(permit — no viewing key on server for this account)";
+        input.type = "text";
+        if (btn) btn.textContent = "Show";
       } else {
         wrap.classList.add("hidden");
         none.classList.remove("hidden");
