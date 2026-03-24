@@ -1364,8 +1364,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const bal = (resp && resp.ok && resp.data && resp.data.balance != null) ? resp.data.balance : "?";
       const addr = String(c.secret_address || "").trim();
       const shortAddr = addr ? maskSecretAddress(addr) : "-";
+      const hasPermit = isPermitSessionValid(c.permit) ? "yes" : "no";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit;
     }
 
     function profileAvatarUrl() {
@@ -2783,6 +2784,19 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var btn = document.getElementById("btnKeplrConnect");
       if (btn) btn.click();
     };
+    let keplrReturnCheckBusy = false;
+    function triggerPendingKeplrCheck(reason) {
+      try {
+        if (keplrReturnCheckBusy) return;
+        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
+        if (!pending || !window.keplr) return;
+        keplrReturnCheckBusy = true;
+        setKeplrFlowStatus(String(reason || "pending_recheck"));
+        var btn = document.getElementById("btnKeplrConnect");
+        if (btn) btn.click();
+      } catch (_e) { /* ignore */ }
+      setTimeout(function () { keplrReturnCheckBusy = false; }, 1800);
+    }
     (function autoConnectInKeplrBrowser() {
       try {
         var q = new URLSearchParams(location.search);
@@ -2809,14 +2823,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
     })();
     window.addEventListener("pageshow", function () {
-      try {
-        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
-        if (pending && window.keplr) {
-          setKeplrFlowStatus("pageshow_recheck");
-          var btn = document.getElementById("btnKeplrConnect");
-          if (btn) btn.click();
-        }
-      } catch (_e) { /* ignore */ }
+      triggerPendingKeplrCheck("pageshow_recheck");
+    });
+    window.addEventListener("focus", function () {
+      triggerPendingKeplrCheck("focus_recheck");
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") triggerPendingKeplrCheck("visible_recheck");
     });
     var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
     if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
