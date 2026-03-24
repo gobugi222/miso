@@ -11,6 +11,7 @@ import { fileURLToPath } from "url";
 import {
   getSnvrBalance,
   getSnvrBalanceWithPermit,
+  getSnvrBalanceWithPermitProbe,
   sendSnvr,
   resolveRecipientToSecretAddress,
   isSecretEnabled,
@@ -259,6 +260,7 @@ app.get("/wallet/balance", async (req, res) => {
   const platform = req.query.platform || "telegram";
   const platform_user_id = req.query.platform_user_id;
   const locale = (req.query.locale || "en").toLowerCase().slice(0, 5);
+  const debugPermit = String(req.query.debug_permit || "") === "1";
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, platform_user_id)), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   const memBal = Number(u.balance || 0);
@@ -274,17 +276,19 @@ app.get("/wallet/balance", async (req, res) => {
     }
   }
   if (u.secret_address && u.permit) {
+    let permitProbe = null;
+    if (debugPermit) permitProbe = await getSnvrBalanceWithPermitProbe(u.secret_address, u.permit);
     try {
       const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
         if (human === 0 && memBal > 0) {
-          return res.json({ ok: true, balance: memBal, source: "memory_fallback" });
+          return res.json({ ok: true, balance: memBal, source: "memory_fallback", permit_debug: permitProbe || undefined });
         }
-        return res.json({ ok: true, balance: human, source: "chain" });
+        return res.json({ ok: true, balance: human, source: "chain", permit_debug: permitProbe || undefined });
       }
     } catch (e) {
-      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback" });
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
     }
   }
   return res.json({ ok: true, balance: memBal, source: "memory" });
@@ -316,22 +320,25 @@ function parsePermitInput(rawPermit) {
 
 /** 메신저 Zero-Log: 클라이언트가 permit/viewing key를 담아 보냄. 저장 안 함. */
 app.post("/wallet/balance", async (req, res) => {
-  const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit } = req.body || {};
+  const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit, debug_permit } = req.body || {};
   const permit = parsePermitInput(rawPermit);
+  const debugPermit = String(debug_permit || "") === "1";
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   const memBal = Number(u.balance || 0);
   // 1) permit 우선
   if (secret_address && permit) {
+    let permitProbe = null;
+    if (debugPermit) permitProbe = await getSnvrBalanceWithPermitProbe(secret_address, permit);
     try {
       const chainBal = await getSnvrBalanceWithPermit(secret_address, permit);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
-        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit" });
-        return res.json({ ok: true, balance: human, source: "chain", auth: "permit" });
+        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit", permit_debug: permitProbe || undefined });
+        return res.json({ ok: true, balance: human, source: "chain", auth: "permit", permit_debug: permitProbe || undefined });
       }
     } catch (e) {
-      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit_invalid" });
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit_invalid", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
       throw e;
     }
   }

@@ -107,13 +107,22 @@ export async function getSnvrBalance(address, viewingKey) {
 
 /** SNIP-20 잔액 조회 (address + permit) */
 export async function getSnvrBalanceWithPermit(address, permit) {
+  const probe = await getSnvrBalanceWithPermitProbe(address, permit);
+  if (probe.ok) return probe.amount;
+  if (probe.error_code === "PERMIT_INVALID") throw new Error("PERMIT_INVALID");
+  return null;
+}
+
+/** Permit 조회 진단용: 어떤 경로에서 실패했는지 상세 반환 */
+export async function getSnvrBalanceWithPermitProbe(address, permit) {
   const c = loadConfig();
-  if (!c.snvr_token || !c.snvr_code_hash) return null;
-  if (!permit || typeof permit !== "object") return null;
+  if (!c.snvr_token || !c.snvr_code_hash) return { ok: false, error_code: "CONFIG_MISSING", errors: [] };
+  if (!permit || typeof permit !== "object") return { ok: false, error_code: "PERMIT_MISSING", errors: [] };
   try {
     const client = getQueryClient();
     const target = String(address).trim();
     const candidates = [];
+    const errors = [];
     const pickAmount = (v) => {
       if (v == null) return;
       const n = Number(v);
@@ -130,7 +139,7 @@ export async function getSnvrBalanceWithPermit(address, permit) {
       const a1 = r1?.balance?.amount;
       pickAmount(a1);
     } catch (_e1) {
-      /* fall through to raw contract queries */
+      errors.push("path1:" + String(_e1?.message || "unknown"));
     }
 
     // Path 2: raw with_permit + balance{address}
@@ -148,7 +157,7 @@ export async function getSnvrBalanceWithPermit(address, permit) {
       const a2 = r2?.balance?.amount;
       pickAmount(a2);
     } catch (_e2) {
-      /* fall through to owner-style query */
+      errors.push("path2:" + String(_e2?.message || "unknown"));
     }
 
     // Path 3: raw with_permit + balance{} (owner implied by permit signer)
@@ -166,19 +175,22 @@ export async function getSnvrBalanceWithPermit(address, permit) {
       const a3 = r3?.balance?.amount;
       pickAmount(a3);
     } catch (_e3) {
-      /* handled below */
+      errors.push("path3:" + String(_e3?.message || "unknown"));
     }
 
-    if (!candidates.length) return null;
-    return String(Math.max(...candidates));
-  } catch (e) {
-    console.warn("getSnvrBalanceWithPermit error:", e?.message);
-    const msg = String(e?.message || "").toLowerCase();
-    // Invalid signature/params/revoked/permission errors should be surfaced clearly.
-    if (msg.includes("permit") || msg.includes("signature") || msg.includes("permission")) {
-      throw new Error("PERMIT_INVALID");
+    if (!candidates.length) {
+      const combined = errors.join(" | ").toLowerCase();
+      if (combined.includes("permit") || combined.includes("signature") || combined.includes("permission")) {
+        return { ok: false, error_code: "PERMIT_INVALID", errors };
+      }
+      return { ok: false, error_code: "QUERY_FAILED", errors };
     }
-    return null;
+    return { ok: true, amount: String(Math.max(...candidates)), errors };
+  } catch (e) {
+    const msg = String(e?.message || "");
+    const low = msg.toLowerCase();
+    const code = (low.includes("permit") || low.includes("signature") || low.includes("permission")) ? "PERMIT_INVALID" : "QUERY_FAILED";
+    return { ok: false, error_code: code, errors: ["fatal:" + msg] };
   }
 }
 
