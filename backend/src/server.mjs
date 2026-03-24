@@ -424,6 +424,29 @@ app.post("/wallet/send", async (req, res) => {
     throw e;
   }
   if (effective < numAmount) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "insufficient_balance") });
+
+  const toSecretAddr = toU.secret_address ? String(toU.secret_address).trim() : "";
+  let chainTxHash = null;
+  // P2P 송금은 운영 지갑(MNEMONIC)에서 수령인 secret 주소로 SNIP-20 transfer — 알림/내부 잔액은 성공 후에만 반영
+  if (USE_SECRET && process.env.MNEMONIC && toSecretAddr && !MOCK) {
+    const amountRaw = String(Math.floor(numAmount * 1e9));
+    const result = await sendSnvr(toSecretAddr, amountRaw);
+    if (!result.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: "on_chain_transfer_failed",
+        message: String(result.error || "SNVR on-chain transfer failed"),
+      });
+    }
+    chainTxHash = result.txHash || null;
+  } else if (USE_SECRET && !process.env.MNEMONIC && !MOCK) {
+    return res.status(503).json({
+      ok: false,
+      error: "chain_transfer_unavailable",
+      message: "MNEMONIC is required on the server for on-chain SNVR transfers.",
+    });
+  }
+
   fromU.balance = effective;
   fromU.balance -= numAmount;
   toU.balance += numAmount;
@@ -434,7 +457,11 @@ app.post("/wallet/send", async (req, res) => {
     to_key: toKey,
     amount: numAmount,
     fee: 0,
-    meta: { to_username: to_username || null, to_one_time_code: to_one_time_code || null },
+    meta: {
+      to_username: to_username || null,
+      to_one_time_code: to_one_time_code || null,
+      txHash: chainTxHash,
+    },
     created_at: new Date().toISOString(),
   });
   const senderName = fromU?.display_name || (fromU?.username ? "@" + fromU.username : fromU?.platform_user_id || "Someone");
@@ -457,7 +484,7 @@ app.post("/wallet/send", async (req, res) => {
     created_at: new Date().toISOString(),
   };
   chatMessages.push(sysMsg);
-  const payload = { ok: true, from_balance: fromU.balance, to_balance: toU.balance };
+  const payload = { ok: true, from_balance: fromU.balance, to_balance: toU.balance, txHash: chainTxHash || undefined };
   if (toPlatform === "telegram") {
     payload.recipient_telegram_id = toId;
     payload.recipient_locale = lang;
