@@ -287,11 +287,18 @@ app.get("/wallet/balance", async (req, res) => {
 
 function parsePermitInput(rawPermit) {
   if (!rawPermit) return null;
-  if (typeof rawPermit === "object") return rawPermit;
+  if (typeof rawPermit === "object") {
+    const exp = Number(rawPermit.expires_at || 0);
+    if (Number.isFinite(exp) && exp > 0 && exp <= Date.now()) return null;
+    return rawPermit;
+  }
   if (typeof rawPermit !== "string") return null;
   try {
     const parsed = JSON.parse(rawPermit);
-    return (parsed && typeof parsed === "object") ? parsed : null;
+    if (!(parsed && typeof parsed === "object")) return null;
+    const exp = Number(parsed.expires_at || 0);
+    if (Number.isFinite(exp) && exp > 0 && exp <= Date.now()) return null;
+    return parsed;
   } catch (_e) {
     return null;
   }
