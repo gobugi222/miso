@@ -1,0 +1,3138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#2AABEE" />
+  <meta name="description" content="Chat, send, swap, and route SNVR on Secret Network. Telegram login, Keplr wallet." />
+  <link rel="manifest" href="manifest.json" />
+  <title>SNVR Messenger</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: "Segoe UI", system-ui, -apple-system, "Inter", sans-serif; margin: 0; padding: 0; min-height: 100vh; line-height: 1.5; }
+    body.light { background: #e4ddd6; color: #000; }
+    body.dark, body { background: #0d1117; color: #e6edf3; }
+    .card { background: var(--card-bg, #161b22); border: 1px solid var(--border, #30363d); border-radius: 10px; padding: 18px; margin-bottom: 14px; }
+    input, button { width: 100%; padding: 10px 12px; margin: 6px 0; border-radius: 8px; border: 1px solid var(--border, #30363d); font-size: 1rem; }
+    input { background: var(--input-bg, #0d1117); color: var(--text, #e6edf3); }
+    /* Keep text fields paste/select friendly on mobile webviews */
+    input, textarea {
+      user-select: text;
+      -webkit-user-select: text;
+      -webkit-touch-callout: default;
+      touch-action: auto;
+      pointer-events: auto;
+    }
+    input:focus, button:focus { outline: 2px solid #58a6ff; outline-offset: 2px; }
+    button.primary { background: var(--primary, #2AABEE); color: #fff; border: none; cursor: pointer; font-weight: 600; transition: background 0.2s; }
+    button.primary:hover { background: var(--primary-hover, #229ED9); }
+    button.primary:active { background: var(--primary-active, #1e8bc3); }
+    body.light button.primary { --primary: #54A9EB; --primary-hover: #3d9de6; --primary-active: #2a8fd9; }
+    button.secondary { background: var(--btn-bg, #21262d); color: var(--text, #e6edf3); border: 1px solid var(--border); cursor: pointer; transition: background 0.2s; }
+    button.secondary:hover { background: var(--btn-hover, #30363d); }
+    .balance { font-size: 1.5rem; font-weight: 700; color: #7ee787; margin: 8px 0; }
+    .error { color: #f85149; font-size: 0.9rem; margin-top: 4px; }
+    .success { color: #7ee787; font-size: 0.9rem; margin-top: 4px; }
+    .hidden { display: none !important; }
+    label { display: block; margin-top: 8px; font-size: 0.9rem; color: var(--muted, #8b949e); }
+    body.light .card { --card-bg: #fff; --border: #e0e0e0; }
+    body.light input { --input-bg: #f5f5f5; --text: #111; }
+    body.light { --text: #000; --muted: #666; --btn-bg: #f0f0f0; --btn-hover: #e0e0e0; }
+
+    /* Telegram-style: sidebar + main */
+    .app-wrap { display: flex; height: var(--app-height, calc(100dvh - 64px)); overflow: hidden; min-height: 0; }
+    .sidebar { width: 260px; min-width: 260px; background: var(--sidebar-bg, #17212b); color: #fff; display: flex; flex-direction: column; }
+    body.light .sidebar { --sidebar-bg: #fff; color: #000; border-right: 1px solid #e0e0e0; }
+    .sidebar-profile { padding: 20px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 12px; }
+    body.light .sidebar-profile { border-color: #eee; }
+    .sidebar-avatar { width: 48px; height: 48px; min-width: 48px; min-height: 48px; border-radius: 50%; background: var(--avatar-bg, #2AABEE); overflow: hidden; flex-shrink: 0; border: 2px solid rgba(255,255,255,0.2); }
+    body.light .sidebar-avatar { border-color: rgba(0,0,0,0.08); }
+    .sidebar-avatar img { width: 100%; height: 100%; object-fit: cover; object-position: center; border-radius: 50%; display: block; }
+    .sidebar-name { font-size: 1rem; font-weight: 600; }
+    .sidebar-meta { font-size: 0.8rem; opacity: 0.85; color: inherit; }
+    .sidebar-balance-line { font-size: 0.85rem; font-weight: 600; color: #7ee787; margin-top: 4px; }
+    body.light .sidebar-balance-line { color: #1a7f37; }
+    .sidebar-menu { flex: 1; padding: 12px 0; overflow-y: auto; }
+    .menu-item { display: flex; align-items: center; gap: 12px; padding: 12px 20px; color: inherit; text-decoration: none; cursor: pointer; border: none; background: none; width: 100%; font-size: 0.95rem; text-align: left; -webkit-tap-highlight-color: transparent; touch-action: manipulation; font-family: inherit; }
+    button.menu-item { appearance: none; -webkit-appearance: none; }
+    .menu-item:hover { background: rgba(255,255,255,0.08); }
+    body.light .menu-item:hover { background: #f5f5f5; }
+    .menu-item.active { background: rgba(42,171,238,0.2); font-weight: 600; }
+    body.light .menu-item.active { background: #e8f4fd; }
+    .menu-item .icon { width: 22px; text-align: center; font-size: 1.1rem; }
+    .main-content { flex: 1; overflow: auto; padding: 20px; background: var(--main-bg, #0e1621); display: flex; justify-content: center; min-height: 0; }
+    body.light .main-content { --main-bg: #e4ddd6; }
+    .chat-messages { background: var(--chat-bg, #0e1621); }
+    body.light .chat-messages { --chat-bg: #e4ddd6; }
+    .view { display: block; width: 100%; max-width: 980px; min-height: 0; }
+    .view-title { font-size: 1.35rem; margin: 0 0 16px; font-weight: 600; }
+
+    #apiUrl { font-size: 0.85rem; }
+    .chat-layout { display: flex; gap: 12px; height: calc(100vh - 80px); min-height: 0; }
+    .chat-list-pane { width: 320px; min-width: 260px; display: flex; flex-direction: column; gap: 12px; }
+    .chat-thread-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    @media (max-width: 800px) {
+      .chat-layout { flex-direction: column; height: auto; }
+      .chat-list-pane { width: 100%; }
+    }
+    .chat-list-item { padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.15s; }
+    .chat-list-item:hover { background: var(--btn-hover, rgba(255,255,255,0.06)); }
+    .chat-list-item .chat-list-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; }
+    .chat-list-item .chat-list-del { flex-shrink: 0; padding: 4px 8px; font-size: 0.75rem; color: #f85149; background: transparent; border: 1px solid #f85149; border-radius: 6px; cursor: pointer; }
+    .chat-list-item .chat-list-del:hover { background: rgba(248,81,73,0.2); }
+    .chat-list-avatar { width: 48px; height: 48px; min-width: 48px; border-radius: 50%; background: var(--tg-blue, #2AABEE); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 600; color: #fff; flex-shrink: 0; }
+    body.light .chat-list-avatar { background: #54A9EB; }
+    .chat-list-body { flex: 1; min-width: 0; }
+    .chat-list-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 2px; }
+    .chat-list-preview { font-size: 0.85rem; color: var(--muted, #8b949e); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chat-list-time { font-size: 0.75rem; color: var(--muted); flex-shrink: 0; }
+    .chat-search-results { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; background: var(--input-bg); }
+    .chat-search-results .search-item { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .chat-search-results .search-item:hover { background: var(--btn-hover); }
+    .chat-search-results .search-item .key { font-size: 0.8rem; color: var(--muted); }
+    .search-hint { font-size: 0.8rem; color: var(--muted); margin: 8px 0 0; }
+    .direct-add { margin-top: 12px; }
+    .direct-add summary { cursor: pointer; color: #58a6ff; font-size: 0.9rem; }
+    .direct-add input { margin-top: 6px; }
+    .msg { max-width: 75%; padding: 8px 12px; border-radius: 12px; margin: 4px 0; clear: both; position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    .msg.mine { background: var(--msg-mine, #2b5278); margin-left: auto; border-bottom-right-radius: 4px; }
+    body.light .msg.mine { --msg-mine: #EFFEDE; color: #000; }
+    .msg.theirs { background: var(--msg-theirs, #182533); border-bottom-left-radius: 4px; }
+    .msg.msg-system { margin: 4px auto; max-width: 85%; background: rgba(42,171,238,0.15); border-radius: 10px; text-align: center; font-size: 0.9rem; }
+    body.light .msg.msg-system { background: rgba(84,169,235,0.2); color: #333; }
+    body.light .msg.theirs { --msg-theirs: #fff; color: #000; border: 1px solid #e0e0e0; }
+    .msg .msg-text { word-break: break-word; }
+    .msg .meta { font-size: 0.7rem; color: rgba(255,255,255,0.6); margin-top: 4px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+    body.light .msg .meta { color: #999; }
+    .msg.mine .meta .check { color: rgba(255,255,255,0.8); }
+    body.light .msg.mine .meta .check { color: #54A9EB; }
+    .msg .delete-btn, .msg .copy-btn { font-size: 0.7rem; cursor: pointer; opacity: 0.8; }
+    .msg .delete-btn { color: #f85149; }
+    .msg .copy-btn { color: var(--muted, #8b949e); }
+    .msg .delete-btn:hover, .msg .copy-btn:hover { opacity: 1; }
+    .header-logo-wrap { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border, #30363d); background: var(--card-bg, #161b22); }
+    .header-logo-wrap img { height: 36px; width: auto; display: block; object-fit: contain; }
+    .header-home-trigger { display: inline-flex; align-items: center; gap: 12px; background: transparent; border: none; color: inherit; padding: 0; margin: 0; cursor: pointer; font: inherit; }
+    .header-home-trigger:focus { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 8px; }
+    .header-add-home { margin-left: auto; padding: 6px 12px; font-size: 0.85rem; border-radius: 8px; background: var(--primary, #2AABEE); color: #fff; border: none; cursor: pointer; font-weight: 600; white-space: nowrap; flex: 0 0 auto; width: max-content; }
+    .header-add-home:hover { background: var(--primary-hover, #229ED9); }
+    .header-add-home.hidden { display: none !important; }
+    @media (min-width: 769px) { .header-add-home:not(.hidden) { display: inline-flex !important; align-items: center; width: max-content; } }
+    @media (max-width: 768px) { .header-add-home { font-size: 0.75rem; padding: 6px 10px; } }
+    a { color: var(--link, #2AABEE); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    body.light a { --link: #54A9EB; }
+    .chat-input { border-radius: 20px !important; }
+    .safe-area-top { padding-top: env(safe-area-inset-top, 0); }
+    .chat-thread-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; width: 100%; }
+    .chat-thread-toolbar .chat-thread-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .chat-empty-state { padding: 16px 12px; text-align: left; max-width: 420px; margin: 0 auto; }
+    .chat-empty-title { font-weight: 700; font-size: 1.05rem; margin: 0 0 8px; color: var(--text, #e6edf3); }
+    body.light .chat-empty-title { color: #111; }
+    .chat-empty-text { font-size: 0.9rem; color: var(--muted, #8b949e); margin: 0 0 12px; line-height: 1.55; }
+    .chat-empty-list { margin: 0; padding-left: 18px; font-size: 0.85rem; color: var(--muted, #8b949e); line-height: 1.65; }
+    .chat-empty-list li { margin-bottom: 8px; }
+    #chatSendError { margin-top: 6px; margin-bottom: 0; }
+    input:focus { outline: 2px solid var(--link, #2AABEE); }
+
+    /* Mobile responsive */
+    @media (max-width: 768px) {
+      html, body {
+        height: auto;
+        min-height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+      }
+      body.dashboard-mode {
+        padding-bottom: calc(86px + env(safe-area-inset-bottom));
+      }
+      .header-logo-wrap { padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top)); }
+      .header-logo-wrap span { font-size: 1rem; }
+      .header-logo-wrap img { height: 28px; }
+      #loginScreen { margin: 12px !important; padding: 16px; max-width: 100%; }
+      .app-wrap {
+        display: block;
+        height: auto !important;
+        min-height: 0;
+        overflow: visible !important;
+      }
+      .sidebar {
+        position: fixed; top: 0; left: 0; bottom: 0; z-index: 1000;
+        width: 280px; min-width: 280px;
+        transform: translateX(-100%); transition: transform 0.25s ease;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+      }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-overlay {
+        display: none; position: fixed; inset: 0; z-index: 999;
+        background: rgba(0,0,0,0.4); opacity: 0; transition: opacity 0.25s;
+      }
+      .sidebar-overlay.open { display: block; opacity: 1; }
+      .main-content {
+        width: 100%;
+        padding: 12px 16px;
+        padding-bottom: calc(110px + env(safe-area-inset-bottom));
+        display: block;
+        flex: none;
+        min-height: calc(100dvh - 56px);
+        overflow-x: hidden;
+        overflow-y: visible !important;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: auto;
+        touch-action: pan-y;
+      }
+      .view {
+        min-height: 0;
+        max-width: 100%;
+        overflow: visible !important;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
+      }
+      #viewChat.view {
+        display: block;
+        min-height: auto;
+      }
+      #viewChat .view-title { margin-bottom: 8px; }
+      #viewChat .chat-layout { min-height: auto; }
+      .btn-menu-toggle {
+        display: flex !important; align-items: center; justify-content: center;
+        width: 40px; height: 40px; padding: 0; margin-right: 8px;
+        background: transparent; border: none; cursor: pointer; font-size: 1.4rem;
+        color: inherit;
+      }
+      .mobile-bottom-nav {
+        display: flex !important; position: fixed; bottom: 0; left: 0; right: 0;
+        background: var(--sidebar-bg, #18233b); border-top: 1px solid var(--border);
+        z-index: 500; padding: 8px 0; padding-bottom: max(8px, env(safe-area-inset-bottom));
+        justify-content: space-around; pointer-events: auto; touch-action: manipulation;
+      }
+      body.light .mobile-bottom-nav { background: #fff; border-color: #e0e0e0; }
+      .mobile-bottom-nav .menu-item {
+        flex-direction: column; padding: 10px 16px; font-size: 0.75rem; gap: 4px;
+        min-height: 44px; min-width: 44px; justify-content: center; align-items: center;
+      }
+      .mobile-bottom-nav .menu-item .icon { font-size: 1.2rem; }
+      .chat-layout {
+        flex-direction: column;
+        flex: none;
+        min-height: auto;
+        height: auto;
+        max-height: none;
+        overflow: visible !important;
+      }
+      .chat-list-pane { width: 100%; min-width: 0; flex-shrink: 0; overflow: visible !important; }
+      .chat-list-pane > .card { overflow: visible !important; max-height: none !important; height: auto !important; }
+      .chat-thread-pane {
+        flex: none;
+        min-height: auto;
+        display: flex;
+        flex-direction: column;
+        overflow: visible !important;
+      }
+      .chat-thread-pane > .card {
+        flex: none;
+        min-height: auto;
+        display: flex;
+        flex-direction: column;
+        max-height: none !important;
+        overflow: visible !important;
+      }
+      #chatMessages {
+        flex: 0 1 auto !important;
+        min-height: 140px !important;
+        max-height: 52vh !important;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+      }
+      .chat-composer { flex-shrink: 0; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+      #txHistory { max-height: none !important; overflow: visible !important; }
+      #viewSend .card, #viewSwap .card, #viewMix .card, #viewReceive .card, #viewSettings .card {
+        overflow: visible !important;
+        max-height: none !important;
+        height: auto !important;
+      }
+      .card { padding: 14px; }
+      input, button { padding: 12px 14px; min-height: 44px; }
+      .view-title { font-size: 1.15rem; }
+    }
+    .btn-menu-toggle { display: none; }
+    .view { min-height: 0; padding-bottom: 6px; }
+    @media (max-width: 768px) {
+      body.dashboard-mode .btn-menu-toggle { display: flex !important; }
+    }
+    @media (min-width: 769px) {
+      .btn-menu-toggle { display: none !important; }
+      .mobile-bottom-nav { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header-logo-wrap safe-area-top">
+    <button type="button" class="btn-menu-toggle" id="btnMenuToggle" data-i18n-aria="header.menuAria">☰</button>
+    <button type="button" id="btnHeaderHome" class="header-home-trigger" title="Go to home">
+      <img src="snvr-messenger-logo.png?v=3" alt="SNVR Messenger" class="header-logo" />
+      <span style="font-size:1.25rem;font-weight:700;">SNVR Messenger</span>
+    </button>
+    <button type="button" class="header-add-home" id="btnAddToHomeHeader" data-i18n-title="header.addHomeTitle" data-i18n="header.addHome">📲 Add to home</button>
+  </div>
+
+  <div id="loginScreen" class="card" style="max-width:440px;margin:20px auto;">
+    <p style="font-size:1.1rem;font-weight:600;margin:0 0 8px;color:var(--text,#e6edf3);" data-i18n="login.brandTitle">SNVR Messenger</p>
+    <p style="font-size:0.9rem;color:var(--muted,#8b949e);margin:0 0 12px;line-height:1.5;" data-i18n="login.tagline">Chat, send, swap, and privacy routing in one app. Sign in with the same Telegram account you use with the bot.</p>
+    <p style="font-size:0.78rem;color:var(--muted,#8b949e);margin:0 0 14px;line-height:1.45;border-left:3px solid #2AABEE;padding-left:10px;" data-i18n-html="login.privacyBox">
+      <strong>Privacy:</strong> Block explorers may show your wallet and contract calls. SNIP-20 is not public like typical ERC-20; privacy is a spectrum. /receive codes can help.<br />
+      <span style="opacity:0.95;">After login, open <strong>Settings</strong> for Keplr, SNVR token, and bot commands.</span>
+    </p>
+    <p style="margin:0 0 6px;font-size:0.95rem;" data-i18n="login.step1">1) Open the SNVR bot in Telegram and send /link alone (no args) → receive a 6-digit code</p>
+    <p style="margin:0 0 12px;font-size:0.85rem;color:var(--muted,#8b949e);" data-i18n="login.codeHint">The code may expire in a few minutes. Use /help in the bot for the full command list.</p>
+    <details class="onboarding-guide" style="margin:12px 0;padding:12px;background:var(--input-bg, rgba(255,255,255,0.05));border-radius:8px;">
+      <summary style="cursor:pointer;font-weight:600;color:#2AABEE;" data-i18n="login.quickSteps">First time? Quick steps</summary>
+      <ol id="loginQuickStepsList" style="margin:12px 0 0 16px;padding:0;font-size:0.88rem;line-height:1.65;color:var(--muted,#8b949e);">
+        <li data-i18n="login.qs1">Check the API URL below, then Test connection</li>
+        <li data-i18n="login.qs2">Telegram bot /link → 6-digit code</li>
+        <li data-i18n="login.qs3">Enter the link code → Sign in</li>
+        <li data-i18n="login.qs4">Then Settings → Connect Keplr and Add SNVR to wallet</li>
+      </ol>
+    </details>
+    <label for="apiUrl" data-i18n="login.apiUrl">API URL</label>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="url" id="apiUrl" data-i18n-placeholder="login.apiUrlPlaceholder" placeholder="https://api.snvr.org" inputmode="url" autocomplete="url" style="flex:1;" />
+      <button type="button" id="btnTestConnection" class="secondary" style="width:auto;padding:10px 14px;" data-i18n="login.testConnection">Test connection</button>
+    </div>
+    <p id="connectionTestResult" class="search-hint hidden" style="margin-top:4px;"></p>
+    <label for="linkCode" data-i18n="login.linkCodeLabel">Link code (6 digits)</label>
+    <input type="text" id="linkCode" placeholder="123456" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" aria-describedby="linkCodeHint" />
+    <p id="linkCodeHint" class="search-hint" style="margin-top:2px;" data-i18n="login.linkCodeHint">Enter the digits from the bot. Spaces are stripped when pasting.</p>
+    <button type="button" id="btnLogin" class="primary" data-i18n="login.signIn">Sign in</button>
+    <p id="loginError" class="error hidden"></p>
+  </div>
+
+  <div id="dashboard" class="app-wrap hidden">
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-profile">
+        <div class="sidebar-avatar"><img id="sidebarAvatar" src="snvr-messenger-logo.png?v=3" alt="Profile" /></div>
+        <div style="min-width:0;flex:1;">
+          <div class="sidebar-name" id="sidebarName">-</div>
+          <div class="sidebar-meta" id="sidebarUser">-</div>
+          <div class="sidebar-balance-line" id="sidebarBalance"></div>
+        </div>
+      </div>
+      <nav class="sidebar-menu" id="sidebarNav">
+        <button type="button" class="menu-item active" data-view="chat"><span class="icon">💬</span> <span data-i18n="nav.chat">Chat</span></button>
+        <button type="button" class="menu-item" data-view="send"><span class="icon">📤</span> <span data-i18n="nav.send">Send</span></button>
+        <button type="button" class="menu-item" data-view="swap"><span class="icon">🔄</span> <span data-i18n="nav.ghostSwap">GhostSwap</span></button>
+        <button type="button" class="menu-item" data-view="mix"><span class="icon">🎲</span> <span data-i18n="nav.routing">Routing</span></button>
+        <button type="button" class="menu-item" data-view="receive"><span class="icon">📥</span> <span data-i18n="nav.receive">Receive</span></button>
+        <button type="button" class="menu-item" data-view="settings"><span class="icon">⚙️</span> <span data-i18n="nav.settings">Settings</span></button>
+        <label class="menu-item" style="cursor:pointer"><span class="icon">🌙</span> <span data-i18n="nav.darkMode">Dark mode</span> <input type="checkbox" id="nightMode" style="width:auto;margin-left:auto" /></label>
+        <button type="button" class="menu-item" id="btnAddToHome"><span class="icon">📲</span> <span data-i18n="nav.addHome">Add to home</span></button>
+        <button type="button" class="menu-item" id="btnLogout"><span class="icon">🚪</span> <span data-i18n="nav.logout">Log out</span></button>
+      </nav>
+    </aside>
+    <nav class="mobile-bottom-nav" id="mobileBottomNav">
+      <button type="button" class="menu-item" data-view="chat"><span class="icon">💬</span> <span data-i18n="nav.chat">Chat</span></button>
+      <button type="button" class="menu-item" data-view="send"><span class="icon">📤</span> <span data-i18n="nav.send">Send</span></button>
+      <button type="button" class="menu-item" data-view="swap"><span class="icon">🔄</span> <span data-i18n="nav.swapShort">Swap</span></button>
+      <button type="button" class="menu-item" data-view="mix"><span class="icon">🎲</span> <span data-i18n="nav.routing">Routing</span></button>
+      <button type="button" class="menu-item" data-view="receive"><span class="icon">📥</span> <span data-i18n="nav.receive">Receive</span></button>
+      <button type="button" class="menu-item" data-view="settings"><span class="icon">⚙️</span> <span data-i18n="nav.settings">Settings</span></button>
+      <button type="button" class="menu-item hidden" id="btnAddToHomeMobile"><span class="icon">📲</span> <span data-i18n="nav.homeMobile">Home</span></button>
+    </nav>
+    <main class="main-content">
+      <div id="viewChat" class="view">
+        <h2 class="view-title" data-i18n="view.chat.title">💬 Chat</h2>
+        <div class="chat-layout">
+          <div class="chat-list-pane">
+            <div class="card">
+              <label data-i18n="chat.searchLabel">Search by name or ID</label>
+              <input type="text" id="chatSearch" data-i18n-placeholder="chat.searchPlaceholder" placeholder="Name, @username, numeric ID…" autocomplete="off" />
+              <div id="chatSearchResults" class="chat-search-results hidden"></div>
+            </div>
+            <div class="card" style="flex:1;min-height:160px;overflow-y:auto;">
+              <h3 class="view-title" style="font-size:1rem;margin-bottom:8px" data-i18n="chat.conversations">Conversations</h3>
+              <div id="chatRoomList"></div>
+              <p class="search-hint" style="margin-top:8px" id="chatListHint" data-i18n="chat.listHint">No chats yet — search above or add an ID below.</p>
+            </div>
+            <div class="card">
+              <h3 class="view-title" style="font-size:1rem;margin-bottom:8px" data-i18n="chat.newChat">New chat</h3>
+              <details class="direct-add">
+                <summary data-i18n="chat.directAddSummary">Not in search? Add by ID</summary>
+                <input type="text" id="chatDirectId" data-i18n-placeholder="chat.directIdPlaceholder" placeholder="Numeric ID e.g. 123456789" />
+                <button id="btnChatDirect" class="secondary" data-i18n="chat.directStart">Start chat with this ID</button>
+              </details>
+            </div>
+          </div>
+          <div class="chat-thread-pane">
+            <div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+              <div class="chat-thread-toolbar" style="margin:0 0 8px;padding:8px 0;border-bottom:1px solid var(--border);">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;width:100%;">
+                  <div style="min-width:0;flex:1;">
+                    <div id="chatThreadTitle" style="font-weight:600;font-size:1rem;">Select a conversation.</div>
+                    <div id="chatThreadStatus" style="font-size:0.8rem;color:var(--muted);">—</div>
+                  </div>
+                  <div class="chat-thread-toolbar-actions">
+                    <div style="font-size:0.8rem;display:flex;align-items:center;gap:4px;">
+                      <span style="color:var(--muted);" data-i18n="chat.autoDelete">Auto-delete</span>
+                      <select id="chatAutoDelete" data-i18n-title="chat.autoDeleteSelectTitle" title="Delete messages after this time; empty thread may disappear from list">
+                    <option value="0" data-i18n="auto.off">Off</option>
+                    <option value="600" data-i18n="auto.m10">10 min</option>
+                    <option value="1800" data-i18n="auto.m30">30 min</option>
+                    <option value="3600" data-i18n="auto.h1">1 hour</option>
+                    <option value="86400" data-i18n="auto.h24">24 hours</option>
+                      </select>
+                    </div>
+                    <button type="button" id="btnSendFromChat" class="primary" style="width:auto;padding:8px 12px;font-size:0.8rem;margin:0;min-height:44px;display:none;" data-i18n-title="chat.btnSendMoneyTitle" data-i18n="chat.btnSendMoney">💰 Send</button>
+                    <button type="button" id="btnDeleteChat" class="secondary" style="width:auto;padding:8px 12px;font-size:0.8rem;margin:0;min-height:44px;display:none;" data-i18n-title="chat.btnDeleteChatTitle" data-i18n="chat.btnDeleteChat">Delete chat</button>
+                  </div>
+                </div>
+              </div>
+              <p class="search-hint" id="autoDeleteHint" style="margin:4px 0 0;font-size:0.75rem;display:none;" data-i18n="chat.autoDeleteHint">⏱ Messages auto-delete; empty threads may leave the list.</p>
+              <div id="chatMessages" class="chat-messages" style="flex:1;min-height:0;max-height:none;overflow-y:auto;padding:12px 0;"></div>
+              <div class="chat-input-wrap chat-composer" style="margin-top:8px;display:flex;gap:8px;align-items:flex-end;">
+                <input type="text" id="chatInput" data-i18n-placeholder="chat.inputPlaceholder" placeholder="Type a message…" class="chat-input" style="flex:1;margin:0;" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" />
+                <button id="btnChatSend" class="primary" style="width:auto;padding:10px 18px;margin:0;min-height:44px;min-width:44px;" type="button" data-i18n="chat.sendBtn">Send</button>
+              </div>
+              <p id="chatSendError" class="error hidden" role="alert"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="viewSend" class="view hidden">
+        <h2 class="view-title" data-i18n="view.send.title">📤 Send</h2>
+        <div class="card">
+          <p class="search-hint" style="margin-top:0;font-size:0.85rem;line-height:1.55;color:#58a6ff;">
+            <strong>Keplr:</strong> There is no separate “Wallet” tab — use <strong>⚙️ Settings</strong> → <strong>Connect Keplr</strong> at the bottom. (Same as Telegram bot <code>/send</code> instructions.)
+          </p>
+          <p class="search-hint" style="margin-top:0;font-size:0.8rem;line-height:1.5;">
+            <strong>Receive code (recommended):</strong> The recipient can open <strong>📥 Receive</strong> or use Telegram <code>/receive</code> for a 6-digit code — paste only the code here. No need to post your <code>secret1…</code> in chat.<br />
+            <strong>Example:</strong> To field <code>482913</code> · Amount <code>10</code> → Send
+          </p>
+          <label>Recipient (@username or 6-digit receive code)</label>
+          <input type="text" id="sendTo" placeholder="@username or 482913" />
+          <label>Amount</label>
+          <input type="number" id="sendAmount" placeholder="10" min="0.01" step="0.01" />
+          <button id="btnSend" class="primary">Send SNVR</button>
+          <p id="sendResult" class="hidden"></p>
+        </div>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem;display:flex;justify-content:space-between;align-items:center;">
+            <span>💳 Activity</span>
+            <button type="button" id="btnClearHistory" class="secondary" style="width:auto;font-size:0.8rem;padding:4px 8px;margin:0;">Clear history</button>
+          </h3>
+          <p class="search-hint">Recent send, swap, routing, and faucet history.</p>
+          <div id="txHistory" style="max-height:260px;overflow-y:auto;font-size:0.9rem;"></div>
+        </div>
+      </div>
+      <div id="viewSwap" class="view hidden">
+        <h2 class="view-title" data-i18n="view.swap.title">🔄 GhostSwap (0.3% fee)</h2>
+        <div class="card">
+          <p class="search-hint" style="margin-top:0;font-size:0.8rem;line-height:1.5;">
+            Requires Keplr signing. Recipient can be <code>@telegram</code>, <code>secret1…</code>, or a <strong>6-digit receive code</strong>.<br />
+            <strong>Tip:</strong> When receiving SNVR from a swap, ask them to use <strong>📥 Receive</strong> or <code>/receive</code> to reduce address exposure.
+          </p>
+          <input type="text" id="swapTo" placeholder="@username · secret1… · 6-digit receive code" />
+          <input type="number" id="swapAmount" placeholder="100" min="0.01" step="0.01" />
+          <button id="btnSwap" class="primary">Swap</button>
+          <p id="swapResult" class="hidden"></p>
+        </div>
+      </div>
+      <div id="viewMix" class="view hidden">
+        <h2 class="view-title" data-i18n="view.mix.title">🎲 Privacy Routing (/mix)</h2>
+        <div class="card">
+          <div id="mixPrivacyCallout" style="margin:0 0 16px;padding:14px 14px 14px 16px;border-radius:10px;border:1px solid rgba(42,171,238,0.5);background:rgba(42,171,238,0.14);line-height:1.55;font-size:0.88rem;color:var(--text,#e6edf3);">
+            <div style="font-weight:700;color:#58a6ff;margin-bottom:10px;font-size:0.95rem;">⭐ Recommended — big privacy win before relayer / stealth</div>
+            <p style="margin:0 0 10px;"><strong>1) Delayed claim</strong> — After deposit, wait <strong style="color:#7ee787;">30–120 minutes</strong>, then use only <strong>Claim (Privacy Recommended)</strong> below. This makes deposit↔claim timing harder to link.</p>
+            <p style="margin:0 0 10px;"><strong>2) Fresh secret1 receive</strong> — Claim to a <strong>new Keplr account</strong> (<code>secret1…</code>); combine with <strong>📥 Receive</strong> or Telegram <code>/receive</code> so you don’t paste addresses in chat.</p>
+            <p style="margin:0;font-size:0.82rem;color:var(--muted,#8b949e);">On-chain fee 1% (0.5% burn + 0.5% ops). Instant claim is faster but easier to time-link.</p>
+          </div>
+          <p class="search-hint" style="margin-top:0;font-size:0.8rem;">
+            If SNVR doesn’t show in Keplr: <strong>Settings</strong> → <strong>Add SNVR to wallet</strong> and copy contract + code hash.
+          </p>
+          <input type="text" id="mixTo" placeholder="Claim to secret1… (new account recommended)" />
+          <input type="number" id="mixAmount" placeholder="50" min="0.01" step="0.01" />
+          <button id="btnMixDeposit" class="secondary">1) Deposit to Relay Pool</button>
+          <button id="btnMixClaimRecommended" class="primary">2) Claim (Privacy Recommended)</button>
+          <button id="btnMixClaimInstant" class="secondary">2) Instant Claim</button>
+          <p class="search-hint" style="margin-bottom:0;font-size:0.78rem;">
+            Privacy Recommended: wait 30–120 minutes after deposit before claiming (see box above).
+          </p>
+          <p class="search-hint" id="mixPending" style="margin-bottom:0"></p>
+          <button type="button" id="btnMixRefreshPending" class="secondary" style="width:auto;margin-top:6px;padding:6px 12px;font-size:0.85rem;">
+            Refresh chain status
+          </button>
+          <div id="mixTicketList" class="search-hint" style="margin-top:8px;"></div>
+          <p id="mixResult" class="hidden"></p>
+        </div>
+      </div>
+      <div id="viewReceive" class="view hidden">
+        <h2 class="view-title" data-i18n="view.receive.title">📥 Receive</h2>
+        <p style="margin:0 0 12px;padding:10px 12px;border-radius:8px;border:1px solid rgba(42,171,238,0.35);background:rgba(42,171,238,0.08);font-size:0.82rem;line-height:1.5;color:var(--text,#e6edf3);">
+          <strong style="color:#58a6ff;">Privacy routing:</strong> For deposits and claims, a code from here avoids posting <code>secret1…</code> in chat and pairs well with claiming to a <strong>fresh secret1</strong> later.
+        </p>
+        <p class="search-hint" style="margin-bottom:12px">One-time code — sender can send SNVR to you <strong>once</strong> with this code. No @username required. (Expires in a few minutes.)<br /><strong>Telegram:</strong> You can also use <code>/receive</code> in the bot for the same flow.</p>
+        <div class="card">
+          <button id="btnReceive" class="primary">Generate receive code</button>
+          <p id="receiveCode" class="success hidden"></p>
+          <p id="receiveUrlWrap" class="hidden" style="margin-top:8px;">
+            <a id="receiveUrl" href="#" target="_blank" rel="noopener" style="word-break:break-all;"></a>
+            <button type="button" id="btnCopyReceiveUrl" class="secondary" style="width:auto;margin-top:6px;padding:6px 12px;">Copy link</button>
+          </p>
+        </div>
+      </div>
+      <div id="viewSettings" class="view hidden">
+        <h2 class="view-title" data-i18n="settings.title">⚙️ Settings</h2>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem" data-i18n="settings.languageHeading">🌐 Language</h3>
+          <label for="langSelect" data-i18n="settings.languageLabel">App language</label>
+          <select id="langSelect" style="margin-top:6px;">
+            <option value="en">English</option>
+            <option value="ko">한국어 (Korean)</option>
+          </select>
+          <p class="search-hint" style="margin-top:8px;" data-i18n="settings.languageHint">Applies to this device. Names and commands like <code>/link</code> stay the same.</p>
+        </div>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem" data-i18n="settings.profile">👤 Profile</h3>
+          <label data-i18n="settings.displayName">Display name</label>
+          <input type="text" id="profileDisplayName" placeholder="Name or nickname" maxlength="64" />
+          <label>Status</label>
+          <input type="text" id="profileStatus" placeholder="e.g. Away" maxlength="128" />
+          <label>Profile photo</label>
+          <input type="file" id="profilePhoto" accept="image/*" style="padding:6px 0;" />
+          <p class="search-hint">JPG, PNG — ~200KB max recommended</p>
+          <button type="button" id="btnProfileSave" class="primary" style="margin-top:8px">Save</button>
+          <p id="profileSaveResult" class="hidden" style="margin-top:6px;"></p>
+        </div>
+        <div class="card" id="walletSnvrCard">
+          <h3 class="view-title" style="font-size:1rem">💎 Add SNVR to Keplr</h3>
+          <p class="search-hint" style="margin-top:0">
+            SNIP-20 tokens may not appear in wallet search results. If SNVR does not appear, add it manually using the Contract address + Code hash below (synced from backend <code style="font-size:0.85em;">/wallet/chain-config</code>).
+          </p>
+          <p id="walletSnvrChainHint" class="search-hint" style="font-size:0.8rem;margin-bottom:8px;"></p>
+          <label>SNVR contract address</label>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+            <input type="text" id="walletSnvrContract" readonly style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Loading…" />
+            <button type="button" id="btnCopySnvrContract" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy</button>
+          </div>
+          <label style="margin-top:10px;display:block;">Code hash</label>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+            <input type="text" id="walletSnvrCodeHash" readonly style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Loading…" />
+            <button type="button" id="btnCopySnvrCodeHash" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy</button>
+          </div>
+          <p class="search-hint" style="margin-top:10px;margin-bottom:0;">
+            <strong>Symbol</strong> SNVR · <strong>Decimals</strong> <span id="walletSnvrDecimals">9</span>
+          </p>
+          <div class="search-hint" style="margin-top:10px;padding:10px 12px;border:1px solid rgba(42,171,238,0.35);border-radius:8px;background:rgba(42,171,238,0.08);">
+            <p style="margin:0 0 6px;font-weight:700;color:#58a6ff;">How to add SNVR (step-by-step)</p>
+            <ol style="margin:0 0 0 16px;line-height:1.65;">
+              <li>Open wallet <strong>Settings</strong> and choose <strong>Add custom token</strong>.</li>
+              <li>Select <strong>Secret Network (secret-4)</strong>.</li>
+              <li>Search for SNVR. If it does not appear, continue with <strong>manual input</strong>.</li>
+              <li>Paste <strong>Contract address</strong> and <strong>Code hash</strong> from this page.</li>
+              <li>Confirm token metadata: <strong>Symbol = SNVR</strong>, <strong>Decimals = 9</strong>.</li>
+              <li>When signing token registration/viewing-key tx, approval may require gas. Without SCRT gas, the <strong>Approve</strong> button may be disabled.</li>
+              <li>Create/approve a <strong>Viewing key</strong> for SNVR. Address only is not enough for balance/transfer features.</li>
+              <li>Open the transaction <strong>Details</strong> screen and check the execute message (<code>set_viewing_key</code>). Copy and save the viewing key safely, then paste it into this app.</li>
+            </ol>
+          </div>
+          <p id="walletSnvrLoadErr" class="search-hint hidden" style="color:#f85149;margin-top:8px;"></p>
+          <p class="search-hint" style="margin-top:8px;color:#f7b955;">
+            ⚠ If SNVR still does not appear, refresh/reopen your wallet app first, then re-check SCRT gas balance and viewing-key creation.
+          </p>
+        </div>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem">📌 Telegram bot — commands</h3>
+          <p class="search-hint" style="margin-top:0">
+            Use <code>/start</code> or <code>/help</code> in the bot for the full guide. Summary below. (Backend + bot must be running.)
+          </p>
+          <details class="search-hint" style="margin-top:8px;">
+            <summary style="cursor:pointer;font-weight:600;">💰 Wallet</summary>
+            <pre style="margin:8px 0;font-size:0.75rem;overflow:auto;white-space:pre-wrap;word-break:break-all;">/balance
+  → Balance (on-chain in bot if bot sync ON in Settings)
+
+/link
+  → No args — 6-digit code for this web app
+
+/receive
+  → 6-digit receive code (send, swap, routing)</pre>
+          </details>
+          <details class="search-hint" style="margin-top:6px;">
+            <summary style="cursor:pointer;font-weight:600;">🔄 Swap · routing</summary>
+            <pre style="margin:8px 0;font-size:0.75rem;overflow:auto;white-space:pre-wrap;">/swap
+  → Keplr required — swap UI is in this app
+
+/route
+  → Privacy routing (relay pool) — run here + Keplr
+
+Recipient: Telegram @username, secret1…, or receive code — bot help uses fullwidth ＠ in examples to avoid bad mentions</pre>
+          </details>
+          <details class="search-hint" style="margin-top:6px;">
+            <summary style="cursor:pointer;font-weight:600;">💬 Chat</summary>
+            <pre style="margin:8px 0;font-size:0.75rem;overflow:auto;white-space:pre-wrap;">/myid
+  → Your Telegram ID (for new chats here)
+
+/msg ＠friend_name Hello  (type normal @ when you send)
+  → Recipient must have started the bot at least once</pre>
+          </details>
+          <p class="search-hint" style="margin-top:10px;font-size:0.78rem;line-height:1.5;">
+            <strong>Privacy:</strong> Explorers may show signer &amp; contract calls; SNIP-20 is not like public ERC-20. Privacy is a spectrum — use receive codes where possible.
+          </p>
+        </div>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem">🔗 Keplr (Zero-Log)</h3>
+          <details class="search-hint" style="margin-bottom:8px;">
+            <summary style="cursor:pointer;color:#58a6ff;">How to connect Keplr</summary>
+            <ol style="margin:8px 0 0 16px;line-height:1.6;">
+              <li>Install <a href="https://www.keplr.app" target="_blank" rel="noopener" style="color:#58a6ff;">Keplr</a> (Chrome / Firefox)</li>
+              <li>Add Secret Network in Keplr</li>
+              <li>Copy contract + code hash from <strong>Add SNVR to wallet</strong> above and register the token</li>
+              <li>Click <strong>Connect Keplr</strong> below → create &amp; save viewing key locally</li>
+            </ol>
+          </details>
+          <p class="search-hint" style="color:#7ee787;font-weight:600;">✓ Viewing key stays on this device only — not stored on our servers.</p>
+          <button type="button" id="btnKeplrConnect" class="primary" style="margin-top:8px">Connect Keplr</button>
+          <button type="button" id="btnKeplrReconnect" class="secondary" style="margin-top:6px;width:auto;padding:6px 12px;">Reconnect Keplr</button>
+          <p id="keplrMobileHint" class="search-hint" style="margin-top:8px;">
+            Mobile note: In normal mobile browsers, Keplr extension is not detected. Use Keplr mobile dApp browser or desktop Chrome with Keplr extension. Address copy alone is not enough; viewing key is also required.
+          </p>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
+            <button type="button" id="btnOpenInKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open in Keplr</button>
+            <button type="button" id="btnCopyKeplrDeeplink" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy Keplr deeplink</button>
+            <button type="button" id="btnCheckKeplrApproval" class="secondary" style="width:auto;padding:6px 12px;margin:0;">I approved in Keplr</button>
+          </div>
+          <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
+          <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
+          <p id="keplrFlowStatus" class="search-hint" style="margin-top:4px;color:#58a6ff;">Flow status: idle</p>
+          <p class="search-hint" style="margin-top:2px;opacity:0.8;">Build: 2026-03-23-keplr-flow-2</p>
+          <label style="margin-top:10px;display:block;">Your address (paste allowed)</label>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+            <input type="text" id="mySecretAddressInput" style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Paste secret1... address here if needed" />
+            <button type="button" id="btnCopyMySecretAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy</button>
+          </div>
+          <p id="walletLinkStatus" class="search-hint" style="margin-top:8px;">Wallet: not linked</p>
+          <div id="walletAuthBadges" class="search-hint" style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span id="badgePermit" style="border:1px solid #7ee787;color:#7ee787;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Permit connected</span>
+            <span id="badgeViewingKey" style="border:1px solid #58a6ff;color:#58a6ff;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Viewing key connected</span>
+          </div>
+          <details class="search-hint" style="margin-top:10px;" open>
+            <summary style="cursor:pointer;font-weight:600;">📋 Mobile manual link (address only or + viewing key)</summary>
+            <p style="margin:8px 0 6px;line-height:1.55;">
+              If auto-connect is not available on mobile, paste your Secret address manually.<br />
+              Viewing key is optional (recommended if available).
+            </p>
+            <label style="margin-top:6px;">Secret address</label>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="manualSecretAddress" placeholder="secret1..." style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
+              <button type="button" id="btnPasteManualAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
+              <button type="button" id="btnEnterManualAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Enter</button>
+            </div>
+            <label style="margin-top:8px;">Viewing key</label>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
+              <button type="button" id="btnPasteManualViewingKey" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
+              <button type="button" id="btnEnterManualViewingKey" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Enter</button>
+            </div>
+            <button type="button" id="btnSaveManualWallet" class="secondary" style="margin-top:8px;">Save manual wallet link</button>
+            <p id="manualWalletResult" class="search-hint hidden" style="margin-top:6px;"></p>
+          </details>
+        </div>
+        <details class="card" style="margin-top:12px;">
+          <summary style="cursor:pointer;font-weight:600;padding:4px 0;">⚙️ Advanced</summary>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+            <p class="search-hint" style="margin-bottom:8px;"><strong>Rotate viewing key</strong> — invalidates the key you previously registered. (Small gas fee.)</p>
+            <button type="button" id="btnRotateViewingKey" class="secondary" style="width:auto;padding:6px 12px;">Rotate viewing key</button>
+            <p class="search-hint" style="margin-top:8px;font-size:0.85rem;">Use <strong>Reconnect Keplr</strong> if you rotated on another device or see errors.</p>
+          </div>
+        </details>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem">🔑 Viewing key</h3>
+          <p class="search-hint">Used for on-chain queries in this app. Don’t paste it in chat.</p>
+          <div id="viewingKeyWrap" style="margin-top:8px;">
+            <input type="password" id="viewingKeyInput" readonly style="font-family:monospace;font-size:0.85rem;" />
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+              <button type="button" id="btnToggleViewingKey" class="secondary" style="width:auto;margin-top:0;">Show</button>
+              <button type="button" id="btnCopyViewingKey" class="secondary" style="width:auto;margin-top:0;">Copy</button>
+              <button type="button" id="btnClearViewingKey" class="secondary" style="width:auto;margin-top:0;">Clear viewing key</button>
+              <button type="button" id="btnApplyViewingKeyNow" class="secondary" style="width:auto;margin-top:0;">Apply this key now</button>
+            </div>
+          </div>
+          <p id="viewingKeyNone" class="search-hint hidden">Not linked</p>
+        </div>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem">🤖 Bot balance sync</h3>
+          <p class="search-hint" style="margin-top:0;">
+            <strong>Auto:</strong> When you finish <strong>Connect Keplr</strong> (permit / viewing key), this turns <strong>ON</strong> so Telegram <code>/balance</code>, send, swap can use your on-chain balance <strong>without opening the messenger again</strong>.<br />
+            OFF: remove from server (Zero-Log); bot shows app balance only
+          </p>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="botBalanceSyncToggle" style="width:auto;" />
+            Sync balance with bot (auto on after wallet connect)
+          </label>
+          <p id="botBalanceSyncStatus" class="search-hint" style="margin-top:8px;">Loading...</p>
+        </div>
+        <div class="card">
+          <p class="search-hint">API: <span id="currentApiUrl"></span></p>
+          <p id="balanceDebug" class="search-hint" style="margin-top:6px;font-size:0.78rem;opacity:0.9;"></p>
+          <p class="search-hint">Log out to change the API URL on the sign-in screen.</p>
+        </div>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem">📲 Add to home screen</h3>
+          <button type="button" id="btnAddToHomeSettings" class="primary" style="margin-bottom:12px;">📲 Add to home screen</button>
+          <p class="search-hint">For an app-like experience, use the button above or follow your browser.</p>
+          <p class="search-hint"><strong>Android</strong>: Chrome menu (⋮) → Install app or Add to Home screen</p>
+          <p class="search-hint"><strong>iPhone</strong>: Safari share → Add to Home Screen</p>
+        </div>
+        <div class="card">
+          <h3 class="view-title" style="font-size:1rem">Product notes</h3>
+          <p class="search-hint"><strong>Telegram-style UI</strong>: bubbles, avatars, Enter to send, read receipts (✓).</p>
+          <p class="search-hint"><strong>Roadmap</strong>: typing indicator, online status, replies — needs API work.</p>
+          <p class="search-hint"><strong>Voice/video</strong>: would need WebRTC + signaling.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (window.Telegram && window.Telegram.WebApp) {
+        try {
+          window.Telegram.WebApp.ready();
+          window.Telegram.WebApp.expand();
+        } catch (e) { /* ignore */ }
+      }
+    const STORAGE_KEY = "snvr_messenger_user";
+    const API_URL_KEY = "snvr_messenger_api_url";
+    const CREDS_STORAGE_KEY = "snvr_messenger_creds";
+    const PERMIT_BACKUP_KEY = "snvr_messenger_permit_backup";
+    const PERMIT_TTL_MS = 30 * 60 * 1000;
+    const KEPLR_PENDING_KEY = "snvr_keplr_approval_pending";
+    const KEPLR_FLOW_STATUS_KEY = "snvr_keplr_flow_status";
+    const LAST_DASHBOARD_VIEW_KEY = "snvr_last_dashboard_view";
+    const LANG_KEY = "snvr_messenger_lang";
+    const DEFAULT_API_URL = "https://api.snvr.org";
+
+    const I18N = {
+      en: {
+        app: { title: "SNVR Messenger", metaDesc: "Chat, send, swap, and route SNVR on Secret Network. Telegram login, Keplr wallet." },
+        header: { menuAria: "Open menu", addHomeTitle: "Add to home screen", addHome: "📲 Add to home" },
+        nav: {
+          chat: "Chat", send: "Send", ghostSwap: "GhostSwap", swapShort: "Swap", routing: "Routing", receive: "Receive",
+          settings: "Settings", darkMode: "Dark mode", addHome: "Add to home", logout: "Log out", homeMobile: "Home",
+        },
+        view: {
+          chat: { title: "💬 Chat" }, send: { title: "📤 Send" }, swap: { title: "🔄 GhostSwap (0.3% fee)" },
+          mix: { title: "🎲 Privacy Routing (/mix)" }, receive: { title: "📥 Receive" },
+        },
+        settings: {
+          title: "⚙️ Settings", languageHeading: "🌐 Language", languageLabel: "App language", languageHint: "Applies to this device. Names and commands like /link stay the same.",
+          profile: "👤 Profile", displayName: "Display name",
+        },
+        login: {
+          brandTitle: "SNVR Messenger",
+          tagline: "Chat, send, swap, and privacy routing in one app. Sign in with the same Telegram account you use with the bot.",
+          privacyBox: "<strong>Privacy:</strong> Block explorers may show your wallet and contract calls. SNIP-20 is not public like typical ERC-20; privacy is a spectrum. /receive codes can help.<br /><span style=\"opacity:0.95\">After login, open <strong>Settings</strong> for Keplr, SNVR token, and bot commands.</span>",
+          step1: "1) Open the SNVR bot in Telegram and send /link alone (no args) → receive a 6-digit code",
+          codeHint: "The code may expire in a few minutes. Use /help in the bot for the full command list.",
+          quickSteps: "First time? Quick steps",
+          qs1: "Check the API URL below, then Test connection",
+          qs2: "Telegram bot /link → 6-digit code",
+          qs3: "Enter the link code → Sign in",
+          qs4: "Then Settings → Connect Keplr and Add SNVR to wallet",
+          devSummary: "Local developers",
+          devBody: "Messenger: <code>npm start</code> (e.g. port 5000) · Backend: <code>node src/server.mjs</code> (e.g. port 3000). Opening <strong>file://</strong> may block API calls — use <code>http://localhost:…</code>.",
+          apiUrl: "API URL", apiUrlPlaceholder: "https://api.snvr.org", testConnection: "Test connection",
+          linkCodeLabel: "Link code (6 digits)", linkCodeHint: "Enter the digits from the bot. Spaces are stripped when pasting.", signIn: "Sign in",
+        },
+        chat: {
+          searchLabel: "Search by name or ID", searchPlaceholder: "Name, @username, numeric ID…", conversations: "Conversations",
+          listHint: "No chats yet — search above or add an ID below.", newChat: "New chat", directAddSummary: "Not in search? Add by ID",
+          directIdPlaceholder: "Numeric ID e.g. 123456789", directStart: "Start chat with this ID", selectConversation: "Select a conversation.",
+          autoDelete: "Auto-delete", autoDeleteSelectTitle: "Delete messages after this time; empty thread may disappear from list",
+          btnSendMoney: "💰 Send", btnSendMoneyTitle: "Send SNVR to this contact", btnDeleteChat: "Delete chat", btnDeleteChatTitle: "Delete entire conversation",
+          autoDeleteHint: "⏱ Messages auto-delete; empty threads may leave the list.", inputPlaceholder: "Type a message…", sendBtn: "Send",
+          emptyTitle: "Pick someone to chat", emptyText: "Search by name or ID above, or use Add by ID below. Then open a conversation.",
+          emptyLi1: "Send SNVR — open a chat and tap 💰 Send, or use the Send tab.", emptyLi2: "Receive — open 📥 Receive for a one-time code.",
+          loadError: "Can't load messages — check connection", noMsg: "No messages yet.", noRooms: "No conversations yet. Search above or add an ID below.",
+          deleteMsg: "Delete", copy: "Copy", copied: "Copied", roomListDelete: "Delete", searchNoResults: "No results. Only users who used the bot appear.",
+          sendFail: "Message not sent. Check connection and try again.",
+          previewStart: "(Start the chat)",
+        },
+        auto: { off: "Off", m10: "10 min", m30: "30 min", h1: "1 hour", h24: "24 hours" },
+        js: {
+          sessionExpired: "Session expired. Please sign in again.",           chatNetwork: "Could not create chat: network error. Check API URL.\n", chatNoApi: "404 — no chat API at this URL: ",
+          chatCreateFail: "Could not create chat: ",
+          peerId: "Enter a peer ID: Telegram numeric ID or telegram:123…", autoDeleteFail: "Auto-delete update failed", deleteConfirm: "This deletes the message permanently. Continue?",
+          deleteRoomConfirm: "Delete this entire conversation?\n\nAll messages will be removed from the list.", deleteFailed: "Delete failed",
+          clearHistoryConfirm: "Clear activity history on this device? (Also clears server-side history cache)", clearHistoryFail: "Clear history failed",
+          nothingToCopy: "Nothing to copy. Check backend chain-config.", copied: "Copied.", copyFailed: "Copy failed. Long-press to select and copy manually.",
+          addHomeHelp: "Android: Chrome menu (⋮) → Install app\niPhone: Safari share → Add to Home Screen", linkCopied: "Link copied.", copyFailedShort: "Copy failed",
+          mixWaitEarly: "Only {min} minutes passed since your last deposit.\nRecommended wait is 30–120 minutes for stronger privacy.\n\nContinue anyway?",
+          mixInstant: "Instant Claim may increase deposit-claim linkability and reduce privacy.\n\nDo you understand this risk and want to continue?",
+        },
+      },
+      ko: {
+        app: { title: "SNVR 메신저", metaDesc: "Secret Network에서 SNVR 채팅·송금·스왑·라우팅. 텔레그램 로그인, Keplr 지갑." },
+        header: { menuAria: "메뉴 열기", addHomeTitle: "홈 화면에 추가", addHome: "📲 홈 화면에 추가" },
+        nav: {
+          chat: "채팅", send: "보내기", ghostSwap: "고스트스왑", swapShort: "스왑", routing: "라우팅", receive: "받기",
+          settings: "설정", darkMode: "다크 모드", addHome: "홈에 추가", logout: "로그아웃", homeMobile: "홈",
+        },
+        view: {
+          chat: { title: "💬 채팅" }, send: { title: "📤 보내기" }, swap: { title: "🔄 고스트스왑 (수수료 0.3%)" },
+          mix: { title: "🎲 프라이버시 라우팅 (/mix)" }, receive: { title: "📥 받기" },
+        },
+        settings: {
+          title: "⚙️ 설정", languageHeading: "🌐 언어", languageLabel: "앱 언어", languageHint: "이 기기에만 적용됩니다. /link 같은 명령어는 그대로입니다.",
+          profile: "👤 프로필", displayName: "표시 이름",
+        },
+        login: {
+          brandTitle: "SNVR 메신저",
+          tagline: "채팅·송금·스왑·프라이버시 라우팅을 한 앱에서. 봇에서 쓰는 것과 같은 텔레그램 계정으로 로그인하세요.",
+          privacyBox: "<strong>프라이버시:</strong> 블록 익스플로러에 지갑·컨트랙트 호출이 보일 수 있습니다. SNIP-20은 일반 ERC-20처럼 공개되지 않습니다. /receive 코드를 활용하세요.<br /><span style=\"opacity:0.95\">로그인 후 <strong>설정</strong>에서 Keplr, SNVR 토큰, 봇 명령을 확인하세요.</span>",
+          step1: "1) 텔레그램에서 SNVR 봇을 열고 /link만 보내기(인자 없음) → 6자리 코드 받기",
+          codeHint: "코드는 몇 분 안에 만료될 수 있습니다. 봇에서 /help로 전체 명령을 확인하세요.",
+          quickSteps: "처음이신가요? 빠른 순서",
+          qs1: "아래 API URL 확인 후 연결 테스트",
+          qs2: "텔레그램 봇 /link → 6자리 코드",
+          qs3: "링크 코드 입력 → 로그인",
+          qs4: "그다음 설정 → Keplr 연결 및 SNVR 지갑에 추가",
+          devSummary: "로컬 개발자",
+          devBody: "메신저: <code>npm start</code> (예: 5000) · 백엔드: <code>node src/server.mjs</code> (예: 3000). <strong>file://</strong>로 열면 API가 막힐 수 있습니다 — <code>http://localhost:…</code>를 사용하세요.",
+          apiUrl: "API URL", apiUrlPlaceholder: "https://api.snvr.org", testConnection: "연결 테스트",
+          linkCodeLabel: "링크 코드 (6자리)", linkCodeHint: "봇에서 받은 숫자를 입력하세요. 붙여넣을 때 공백은 자동 제거됩니다.", signIn: "로그인",
+        },
+        chat: {
+          searchLabel: "이름 또는 ID로 검색", searchPlaceholder: "이름, @username, 숫자 ID…", conversations: "대화 목록",
+          listHint: "대화가 없습니다 — 위에서 검색하거나 아래 ID로 추가하세요.", newChat: "새 채팅", directAddSummary: "검색에 없나요? ID로 추가",
+          directIdPlaceholder: "숫자 ID 예: 123456789", directStart: "이 ID로 채팅 시작", selectConversation: "대화를 선택하세요.",
+          autoDelete: "자동 삭제", autoDeleteSelectTitle: "이 시간이 지나면 메시지 삭제; 빈 대화는 목록에서 사라질 수 있음",
+          btnSendMoney: "💰 보내기", btnSendMoneyTitle: "이 연락처로 SNVR 보내기", btnDeleteChat: "채팅 삭제", btnDeleteChatTitle: "대화 전체 삭제",
+          autoDeleteHint: "⏱ 메시지가 자동 삭제됩니다. 빈 대화는 목록에서 사라질 수 있습니다.", inputPlaceholder: "메시지 입력…", sendBtn: "보내기",
+          emptyTitle: "대화 상대를 선택하세요", emptyText: "위에서 이름·ID로 검색하거나 아래에서 ID로 추가한 뒤 대화를 엽니다.",
+          emptyLi1: "SNVR 보내기 — 채팅을 연 뒤 💰 보내기를 누르거나 보내기 탭을 사용합니다.", emptyLi2: "받기 — 📥 받기에서 일회용 코드를 만듭니다.",
+          loadError: "메시지를 불러올 수 없습니다 — 연결을 확인하세요", noMsg: "메시지가 없습니다.", noRooms: "대화가 없습니다. 위에서 검색하거나 아래 ID로 추가하세요.",
+          deleteMsg: "삭제", copy: "복사", copied: "복사됨", roomListDelete: "삭제", searchNoResults: "결과 없음. 봇을 한 번이라도 쓴 사용자만 검색됩니다.",
+          sendFail: "전송 실패. 연결을 확인하고 다시 시도하세요.",
+          previewStart: "(대화 시작)",
+        },
+        auto: { off: "끔", m10: "10분", m30: "30분", h1: "1시간", h24: "24시간" },
+        js: {
+          sessionExpired: "세션이 만료되었습니다. 다시 로그인하세요.",
+          chatNetwork: "채팅을 만들 수 없습니다: 네트워크 오류. API URL을 확인하세요.\n",
+          chatNoApi: "404 — 이 URL에 채팅 API가 없습니다: ",
+          chatCreateFail: "채팅을 만들 수 없습니다: ",
+          peerId: "상대 ID를 입력하세요: 텔레그램 숫자 ID 또는 telegram:123…",
+          autoDeleteFail: "자동 삭제 설정 실패",
+          deleteConfirm: "이 메시지를 영구 삭제할까요?",
+          deleteRoomConfirm: "이 대화 전체를 삭제할까요?\n\n목록에서 모든 메시지가 제거됩니다.",
+          deleteFailed: "삭제 실패",
+          clearHistoryConfirm: "이 기기의 활동 기록을 지울까요? (서버 캐시 기록도 삭제됩니다)",
+          clearHistoryFail: "기록 삭제 실패",
+          nothingToCopy: "복사할 내용이 없습니다. 백엔드 chain-config를 확인하세요.",
+          copied: "복사했습니다.", copyFailed: "복사 실패. 길게 눌러 직접 선택해 복사하세요.",
+          addHomeHelp: "Android: Chrome 메뉴(⋮) → 앱 설치 또는 홈 화면에 추가\niPhone: Safari 공유 → 홈 화면에 추가",
+          linkCopied: "링크를 복사했습니다.", copyFailedShort: "복사 실패",
+          mixWaitEarly: "마지막 입금 후 {min}분만 지났습니다.\n권장 대기는 30~120분입니다(프라이버시).\n\n그래도 계속할까요?",
+          mixInstant: "즉시 클레임은 입금·클레임을 연결하기 쉬워 프라이버시가 줄어질 수 있습니다.\n\n위험을 이해했고 계속할까요?",
+        },
+      },
+    };
+
+    function getLang() {
+      var s = localStorage.getItem(LANG_KEY);
+      if (s === "ko" || s === "en") return s;
+      var nav = (navigator.language || "").toLowerCase();
+      return nav.startsWith("ko") ? "ko" : "en";
+    }
+
+    function t(key, vars) {
+      var parts = key.split(".");
+      function pick(lang) {
+        var o = I18N[lang];
+        for (var i = 0; i < parts.length; i++) {
+          o = o && o[parts[i]];
+        }
+        return o;
+      }
+      var v = pick(getLang()) || pick("en");
+      if (typeof v !== "string") return key;
+      if (vars) {
+        for (var vk in vars) {
+          if (Object.prototype.hasOwnProperty.call(vars, vk)) {
+            v = v.replace(new RegExp("\\{" + vk + "\\}", "g"), String(vars[vk]));
+          }
+        }
+      }
+      return v;
+    }
+
+    function applyI18n() {
+      var lang = getLang();
+      document.documentElement.lang = lang === "ko" ? "ko" : "en";
+      document.title = t("app.title");
+      var metaD = document.querySelector('meta[name="description"]');
+      if (metaD) metaD.setAttribute("content", t("app.metaDesc"));
+      document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+        var k = el.getAttribute("data-i18n-html");
+        if (k) el.innerHTML = t(k);
+      });
+      document.querySelectorAll("[data-i18n]").forEach(function (el) {
+        if (el.hasAttribute("data-i18n-html")) return;
+        var k = el.getAttribute("data-i18n");
+        if (!k) return;
+        var v = t(k);
+        if (el.tagName === "OPTION") el.textContent = v;
+        else el.textContent = v;
+      });
+      document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
+        var k = el.getAttribute("data-i18n-placeholder");
+        if (k) el.setAttribute("placeholder", t(k));
+      });
+      document.querySelectorAll("[data-i18n-title]").forEach(function (el) {
+        var k = el.getAttribute("data-i18n-title");
+        if (k) el.setAttribute("title", t(k));
+      });
+      document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+        var k = el.getAttribute("data-i18n-aria");
+        if (k) el.setAttribute("aria-label", t(k));
+      });
+      var ls = document.getElementById("langSelect");
+      if (ls) ls.value = lang;
+    }
+
+    function isPermitSessionValid(permit) {
+      if (!permit || typeof permit !== "object") return false;
+      const exp = Number(permit.expires_at || 0);
+      return Number.isFinite(exp) && exp > Date.now();
+    }
+    function normalizePermitSession(permit) {
+      if (!permit || typeof permit !== "object") return null;
+      const base = Object.assign({}, permit);
+      const now = Date.now();
+      const issued = Number(base.issued_at || now);
+      const expires = Number(base.expires_at || (issued + PERMIT_TTL_MS));
+      base.issued_at = issued;
+      base.expires_at = expires;
+      return base;
+    }
+    function getCreds() {
+      try {
+        const creds = JSON.parse(localStorage.getItem(CREDS_STORAGE_KEY));
+        if (!creds || typeof creds !== "object") return null;
+        if (!creds.permit) {
+          try {
+            const backupPermit = JSON.parse(localStorage.getItem(PERMIT_BACKUP_KEY) || "null");
+            if (backupPermit && typeof backupPermit === "object") creds.permit = backupPermit;
+          } catch (_e) { /* ignore */ }
+        }
+        creds.permit = normalizePermitSession(creds.permit);
+        if (!isPermitSessionValid(creds.permit)) {
+          creds.permit = null;
+          try { localStorage.removeItem(PERMIT_BACKUP_KEY); } catch (_e) { /* ignore */ }
+        }
+        return creds;
+      } catch {
+        return null;
+      }
+    }
+    function setCreds(secret_address, viewing_key, permit) {
+      var prev = getCreds() || {};
+      var finalPermit = permit === undefined ? (prev.permit || null) : normalizePermitSession(permit || null);
+      if (!finalPermit) {
+        try {
+          const backupPermit = JSON.parse(localStorage.getItem(PERMIT_BACKUP_KEY) || "null");
+          if (backupPermit && typeof backupPermit === "object") finalPermit = normalizePermitSession(backupPermit);
+        } catch (_e) { /* ignore */ }
+      }
+      if (!isPermitSessionValid(finalPermit)) finalPermit = null;
+      var next = {
+        secret_address: secret_address || "",
+        viewing_key: viewing_key || prev.viewing_key || "",
+        permit: finalPermit,
+      };
+      localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify(next));
+      if (next.permit) {
+        try { localStorage.setItem(PERMIT_BACKUP_KEY, JSON.stringify(next.permit)); } catch (_e) { /* ignore */ }
+      }
+    }
+    function clearCreds() {
+      localStorage.removeItem(CREDS_STORAGE_KEY);
+      localStorage.removeItem(PERMIT_BACKUP_KEY);
+    }
+    function hasWalletAuthCreds(c) {
+      return !!(c && c.secret_address && (isPermitSessionValid(c.permit) || !!c.viewing_key));
+    }
+    function bodyWithCreds(body) {
+      const c = getCreds();
+      if (c && c.secret_address) {
+        var out = Object.assign({}, body, { secret_address: c.secret_address });
+        if (c.viewing_key) out.viewing_key = c.viewing_key;
+        if (isPermitSessionValid(c.permit)) out.permit = c.permit;
+        return out;
+      }
+      return body;
+    }
+    function maskSecretAddress(addr) {
+      const v = String(addr || "").trim();
+      if (!v) return "";
+      if (v.length <= 14) return v;
+      return v.slice(0, 10) + "..." + v.slice(-6);
+    }
+    function getApiUrl() {
+      const q = new URLSearchParams(location.search);
+      const fromInput = document.getElementById("apiUrl") ? document.getElementById("apiUrl").value : "";
+      return (q.get("api") || fromInput || localStorage.getItem(API_URL_KEY) || DEFAULT_API_URL).replace(/\/$/, "");
+    }
+    function isTelegramInAppBrowser() {
+      var ua = String(navigator.userAgent || "");
+      return /Telegram/i.test(ua) || !!(window.Telegram && window.Telegram.WebApp);
+    }
+    function buildKeplrWebBrowserDeeplink() {
+      var target = "https://app.snvr.org";
+      try {
+        if (/^https?:/i.test(location.href)) {
+          var u = new URL(location.href);
+          u.searchParams.set("view", "settings");
+          u.searchParams.set("keplr_autoconnect", "1");
+          target = u.toString();
+        } else {
+          target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
+        }
+      } catch (_e) {
+        target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
+      }
+      return "https://deeplink.keplr.app/web-browser?url=" + encodeURIComponent(target);
+    }
+    async function withTimeout(promise, ms, timeoutLabel) {
+      let timer = null;
+      const t = new Promise(function (_resolve, reject) {
+        timer = setTimeout(function () {
+          reject(new Error(timeoutLabel || "TIMEOUT"));
+        }, Number(ms) || 10000);
+      });
+      try {
+        return await Promise.race([promise, t]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    function tryAutoReturnAfterConnect() {
+      var hint = document.getElementById("keplrOpenHint");
+      if (hint) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#7ee787";
+        hint.textContent = "Connected. Return to SNVR Messenger app manually.";
+      }
+    }
+    async function pasteIntoInput(inputEl) {
+      if (!inputEl) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const t = await navigator.clipboard.readText();
+          if (t && String(t).trim()) {
+            inputEl.value = String(t).trim();
+            return;
+          }
+        }
+      } catch (_e) { /* ignore */ }
+      const manual = prompt("Paste value here:");
+      if (manual != null) inputEl.value = String(manual).trim();
+    }
+    function setKeplrFlowStatus(text) {
+      try { localStorage.setItem(KEPLR_FLOW_STATUS_KEY, String(text || "idle")); } catch (_e) { /* ignore */ }
+      var el = document.getElementById("keplrFlowStatus");
+      if (el) el.textContent = "Flow status: " + String(text || "idle");
+    }
+    /** Telegram Web App start_param / ?view= — maps to showView() names */
+    function normalizeDeepLinkView(raw) {
+      if (raw == null || raw === "") return null;
+      var s = String(raw).trim().toLowerCase();
+      if (s === "routing" || s === "route" || s === "mix") return "mix";
+      if (["chat", "send", "swap", "receive", "settings"].indexOf(s) >= 0) return s;
+      return null;
+    }
+    function getDesiredViewFromBootstrap() {
+      var q = new URLSearchParams(location.search);
+      var v = normalizeDeepLinkView(q.get("view") || q.get("tgWebAppStartParam"));
+      if (!v && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe)
+        v = normalizeDeepLinkView(window.Telegram.WebApp.initDataUnsafe.start_param);
+      if (!v) v = normalizeDeepLinkView(sessionStorage.getItem("snvr_deeplink_view"));
+      // Refresh / Telegram WebView: sessionStorage may reset — localStorage keeps last tab.
+      if (!v) {
+        try {
+          v = normalizeDeepLinkView(localStorage.getItem(LAST_DASHBOARD_VIEW_KEY));
+        } catch (_e) {
+          v = null;
+        }
+      }
+      return v;
+    }
+    function captureDeepLinkForSession() {
+      var q = new URLSearchParams(location.search);
+      var apiQ = q.get("api");
+      if (apiQ) {
+        var a = apiQ.replace(/\/$/, "");
+        localStorage.setItem(API_URL_KEY, a);
+        var inp = document.getElementById("apiUrl");
+        if (inp) inp.value = a;
+      }
+      var v = normalizeDeepLinkView(q.get("view") || q.get("tgWebAppStartParam"));
+      if (!v && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe)
+        v = normalizeDeepLinkView(window.Telegram.WebApp.initDataUnsafe.start_param);
+      if (v) sessionStorage.setItem("snvr_deeplink_view", v);
+      var to = q.get("to");
+      var amount = q.get("amount");
+      if (to) sessionStorage.setItem("snvr_deeplink_to", to);
+      if (amount) sessionStorage.setItem("snvr_deeplink_amount", amount);
+    }
+    function applyFieldDeepLinks(viewName) {
+      var q = new URLSearchParams(location.search);
+      var to = q.get("to") || sessionStorage.getItem("snvr_deeplink_to");
+      var amount = q.get("amount") || sessionStorage.getItem("snvr_deeplink_amount");
+      sessionStorage.removeItem("snvr_deeplink_to");
+      sessionStorage.removeItem("snvr_deeplink_amount");
+      if (to && (viewName === "send" || viewName === "swap")) {
+        var st = document.getElementById(viewName === "send" ? "sendTo" : "swapTo");
+        if (st) {
+          try { to = decodeURIComponent(to); } catch (e) { /* keep raw */ }
+          st.value = to;
+        }
+      }
+      if (amount && (viewName === "send" || viewName === "swap" || viewName === "mix")) {
+        var id = viewName === "send" ? "sendAmount" : viewName === "swap" ? "swapAmount" : "mixAmount";
+        var el = document.getElementById(id);
+        if (el) el.value = amount;
+      }
+    }
+    function stripDeepLinkQueryFromUrl() {
+      var q = new URLSearchParams(location.search);
+      if (!q.toString()) return;
+      ["view", "api", "to", "amount", "tgWebAppStartParam"].forEach(function (k) { q.delete(k); });
+      var s = q.toString();
+      try {
+        history.replaceState({}, "", location.pathname + (s ? "?" + s : "") + location.hash);
+      } catch (e) { /* ignore */ }
+    }
+    function getUser() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
+    }
+    function setUser(platform, platform_user_id, apiUrl) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ platform, platform_user_id }));
+      if (apiUrl) localStorage.setItem(API_URL_KEY, apiUrl);
+    }
+    function clearUser() { localStorage.removeItem(STORAGE_KEY); }
+    function getTelegramInitUser() {
+      try {
+        const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+        const u = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+        if (!u || (!u.id && u.id !== 0)) return null;
+        return {
+          id: String(u.id),
+          username: u.username ? String(u.username).replace(/^@/, "") : "",
+        };
+      } catch (_e) {
+        return null;
+      }
+    }
+    async function tryTelegramAutoSignIn() {
+      const existing = getUser();
+      if (existing && existing.platform_user_id) return true;
+      const tgUser = getTelegramInitUser();
+      if (!tgUser) return false;
+      const registerBody = {
+        platform: "telegram",
+        platform_user_id: tgUser.id,
+      };
+      if (tgUser.username) registerBody.username = tgUser.username;
+      const rr = await api("/wallet/register", registerBody);
+      if (!rr.ok) return false;
+      setUser("telegram", tgUser.id, getApiUrl());
+      return true;
+    }
+
+    async function api(path, body, method) {
+      const url = getApiUrl() + path;
+      let opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
+      if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
+      let res, text;
+      try {
+        res = await fetch(url, opt);
+        text = await res.text();
+      } catch (e) {
+        return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (e.message || "") + ")" } };
+      }
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
+      return { ok: res.ok, status: res.status, data };
+    }
+    async function syncServerWalletLink(secretAddress, viewingKey, permit) {
+      const u = getUser();
+      if (!u || !secretAddress) return { ok: false, skipped: true };
+      const creds = getCreds();
+      const p = permit !== undefined ? permit : creds?.permit || null;
+      if (!p) return { ok: false, skipped: true };
+      return api("/wallet/link-secret", {
+        platform: u.platform,
+        platform_user_id: u.platform_user_id,
+        secret_address: secretAddress,
+        viewing_key: "",
+        permit: p || null,
+      });
+    }
+    async function ensureServerPermitSync() {
+      const u = getUser();
+      const c = getCreds();
+      if (!u || !c?.secret_address || !isPermitSessionValid(c?.permit)) return false;
+      const linkR = await syncServerWalletLink(c.secret_address, "", c.permit);
+      if (!linkR.ok && !linkR.skipped) return false;
+      const onR = await api("/wallet/bot-balance-sync", {
+        platform: u.platform,
+        platform_user_id: u.platform_user_id,
+        enabled: true,
+        secret_address: c.secret_address,
+        viewing_key: "",
+        permit: c.permit,
+      });
+      return !!onR.ok;
+    }
+    async function hydrateCredsFromServer() {
+      const u = getUser();
+      if (!u) return;
+      const prev = getCreds() || {};
+      const q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
+      const syncR = await api("/wallet/bot-balance-sync?" + q);
+      let addr = syncR.ok ? String(syncR.data?.secret_address || "").trim() : "";
+      if (!addr) addr = String(prev.secret_address || "").trim();
+      if (!addr) return;
+      const permitFromServer = syncR.ok ? (syncR.data?.permit || null) : null;
+      const permit = permitFromServer || prev.permit || null;
+      if (permit) {
+        setCreds(addr, "", permit);
+      }
+    }
+    function myKey() {
+      const u = getUser();
+      return u ? u.platform + ":" + u.platform_user_id : "";
+    }
+
+    function showView(name) {
+      try {
+        if (["chat", "send", "swap", "mix", "receive", "settings"].indexOf(name) >= 0) {
+          try {
+            localStorage.setItem(LAST_DASHBOARD_VIEW_KEY, name);
+            sessionStorage.setItem("snvr_last_dashboard_view", name);
+          } catch (_e) { /* ignore */ }
+        }
+      } catch (_e) { /* ignore */ }
+      if (name !== "chat") clearChatPoll();
+      ["chat", "send", "swap", "mix", "receive", "settings"].forEach(function (v) {
+        var el = document.getElementById("view" + v.charAt(0).toUpperCase() + v.slice(1));
+        if (el) el.classList.toggle("hidden", v !== name);
+      });
+      document.querySelectorAll(".menu-item[data-view]").forEach(function (a) {
+        a.classList.toggle("active", a.getAttribute("data-view") === name);
+      });
+      if (name === "chat") {
+        openChatList();
+        if (currentRoomId) {
+          void loadChatMessages();
+          if (!chatPollTimer) chatPollTimer = setInterval(loadChatMessages, 3000);
+        } else {
+          clearChatPoll();
+          renderChatThreadPlaceholder();
+        }
+      }
+      if (name === "send") {
+        loadHistory();
+        var codeFromUrl = sessionStorage.getItem("snvr_send_code");
+        if (codeFromUrl) {
+          document.getElementById("sendTo").value = codeFromUrl;
+          sessionStorage.removeItem("snvr_send_code");
+        }
+      }
+      if (name === "mix") { refreshMixPending(); }
+      if (name === "settings") {
+        loadProfileForm();
+        loadViewingKey();
+        loadWalletSnvrInfo();
+        refreshWalletLinkStatusUi();
+        loadBotBalanceSync();
+      }
+    }
+    function showScreen(login) {
+      document.getElementById("loginScreen").classList.toggle("hidden", !login);
+      document.getElementById("dashboard").classList.toggle("hidden", login);
+      document.body.classList.toggle("dashboard-mode", !login);
+      syncAppLayoutHeight();
+      enforceMobileScrollLayout();
+      var h = document.getElementById("btnAddToHomeHeader");
+      var m = document.getElementById("btnAddToHomeMobile");
+      if (h) h.classList.toggle("hidden", login);
+      if (m) m.classList.toggle("hidden", login);
+      var curl = document.getElementById("currentApiUrl");
+      if (curl) curl.textContent = getApiUrl();
+      var su = document.getElementById("sidebarUser");
+      if (su && !login) {
+        var u = getUser();
+        su.textContent = u ? u.platform + ":" + u.platform_user_id : "-";
+      }
+      if (!login) {
+        // Hydrate server-linked wallet before first paint of a tab so Settings doesn't show
+        // "viewing key disconnected" while creds are still syncing (race with loadViewingKey).
+        void (async function () {
+          try {
+            await hydrateCredsFromServer();
+          } catch (_e) { /* ignore */ }
+          try { await ensureServerPermitSync(); } catch (_e) { /* ignore */ }
+          if (!hasWalletAuthCreds(getCreds())) {
+            try { await tryAutoRecoverPermitOnPc(); } catch (_e) { /* ignore */ }
+          }
+          loadViewingKey();
+          refreshWalletLinkStatusUi();
+          refreshBalance();
+          refreshProfileSidebar();
+          if (hasWalletAuthCreds(getCreds())) setKeplrFlowStatus("connected");
+          var dashView = getDesiredViewFromBootstrap() || "chat";
+          sessionStorage.removeItem("snvr_deeplink_view");
+          showView(dashView);
+          applyFieldDeepLinks(dashView);
+          stripDeepLinkQueryFromUrl();
+          updateAddToHomeVisibility();
+          void refreshMixPending();
+        })();
+      }
+      var nm = document.getElementById("nightMode");
+      if (nm) {
+        var dark = localStorage.getItem("snvr_night_mode") !== "0";
+        nm.checked = dark;
+        document.body.classList.toggle("light", !dark);
+      }
+    }
+
+    /** POST (local permit/vk) first; if invalid, fall back to GET (server-stored link for Telegram parity). */
+    async function fetchWalletBalanceForUi(u) {
+      const c = getCreds();
+      if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
+      let r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+      let hadAuthFallback = false;
+      if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
+        // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
+        try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
+        r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+        if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
+          hadAuthFallback = true;
+          r = await fetchWalletBalanceServerOnly(u);
+        }
+      }
+      // If local permit/address combo returns zero, trust server-linked result when higher.
+      if (r.ok && Number(r.data?.balance || 0) === 0) {
+        const serverR = await fetchWalletBalanceServerOnly(u);
+        if (serverR.ok && Number(serverR.data?.balance || 0) > 0) {
+          try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
+          r = serverR;
+        }
+      }
+      // Self-heal: if still memory source while local permit exists, force server re-link once.
+      if (r.ok && String(r.data?.source || "") === "memory") {
+        const c2 = getCreds();
+        if (c2?.secret_address && isPermitSessionValid(c2?.permit)) {
+          try {
+            await syncServerWalletLink(c2.secret_address, "", c2.permit);
+            await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
+            const retry = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+            if (retry?.ok) r = retry;
+          } catch (_e) { /* ignore */ }
+        }
+      }
+      if (hadAuthFallback && r?.ok && r?.data && !r.data.auth) r.data.auth = "auth_fallback";
+      return r;
+    }
+    async function refreshBalance() {
+      const u = getUser();
+      if (!u) return;
+      const r = await fetchWalletBalanceForUi(u);
+      const b = document.getElementById("balance");
+      if (b) b.textContent = r.ok ? r.data.balance : "?";
+      setBalanceDebug(r, u);
+    }
+    async function fetchWalletBalanceServerOnly(u) {
+      const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
+        "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
+      return api(q);
+    }
+    async function fetchWalletBalanceWithFallback(u) {
+      const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
+      let r = await api("/wallet/balance", primaryBody);
+      const authErr = r && !r.ok && (r.data?.error === "viewing_key_invalid" || r.data?.error === "permit_invalid");
+      if (!authErr) return r;
+      // Local auth may be stale while server-side link is valid (e.g. bot /balance works).
+      const c = getCreds();
+      if (c?.secret_address) setCreds(c.secret_address, "", null);
+      else clearCreds();
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
+    }
+    function setBalanceDebug(resp, u) {
+      const el = document.getElementById("balanceDebug");
+      if (!el) return;
+      if (!u) { el.textContent = ""; return; }
+      const c = getCreds() || {};
+      const src = resp?.data?.source || "-";
+      const auth = resp?.data?.auth || "-";
+      const bal = (resp && resp.ok && resp.data && resp.data.balance != null) ? resp.data.balance : "?";
+      const addr = String(c.secret_address || "").trim();
+      const shortAddr = addr ? maskSecretAddress(addr) : "-";
+      const hasPermit = isPermitSessionValid(c.permit) ? "yes" : "no";
+      el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit;
+    }
+
+    function profileAvatarUrl() {
+      const u = getUser();
+      if (!u) return "";
+      return getApiUrl() + "/profile/avatar?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id) + "&t=" + Date.now();
+    }
+    function refreshProfileSidebar() {
+      const u = getUser();
+      const nameEl = document.getElementById("sidebarName");
+      const userEl = document.getElementById("sidebarUser");
+      const balanceEl = document.getElementById("sidebarBalance");
+      const avatarEl = document.getElementById("sidebarAvatar");
+      if (!u) {
+        if (nameEl) nameEl.textContent = "SNVR Messenger";
+        if (userEl) userEl.textContent = "-";
+        if (balanceEl) balanceEl.textContent = "";
+        if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
+        return;
+      }
+      if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
+      Promise.all([
+        api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
+        fetchWalletBalanceForUi(u),
+      ]).then(function (results) {
+        const profileR = results[0];
+        const balanceR = results[1];
+        let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
+        const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
+        if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
+          if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
+        } else {
+          if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
+        }
+        setBalanceDebug(balanceR, u);
+        if (profileR.ok && profileR.data) {
+          if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
+          if (avatarEl) {
+            if (profileR.data.has_avatar) {
+              avatarEl.src = profileAvatarUrl();
+              avatarEl.onerror = function () { this.onerror = null; this.src = "snvr-messenger-logo.png?v=3"; };
+            } else {
+              avatarEl.src = "snvr-messenger-logo.png?v=3";
+              avatarEl.onerror = null;
+            }
+          }
+        } else {
+          if (nameEl) nameEl.textContent = "SNVR Messenger";
+          if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
+        }
+      }).catch(function () {
+        if (nameEl) nameEl.textContent = "SNVR Messenger";
+        if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
+        if (balanceEl) balanceEl.textContent = "";
+        setBalanceDebug({ ok: false, data: { source: "error", auth: "error", balance: "?" } }, u);
+      });
+    }
+    async function loadProfileForm() {
+      const u = getUser();
+      if (!u) return;
+      const r = await api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+      document.getElementById("profileDisplayName").value = (r.ok && r.data && r.data.display_name) ? r.data.display_name : "";
+      document.getElementById("profileStatus").value = (r.ok && r.data && r.data.status_text) ? r.data.status_text : "";
+      document.getElementById("profilePhoto").value = "";
+      document.getElementById("profileSaveResult").classList.add("hidden");
+      refreshProfileSidebar();
+    }
+
+    function copyToClipboardSnvr(text, doneMsg) {
+      if (!text || !String(text).trim()) {
+        alert(t("js.nothingToCopy"));
+        return;
+      }
+      var clip = String(text).trim();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(clip).then(function () { alert(doneMsg || t("js.copied")); }).catch(function () { copyToClipboardSnvrFallback(clip, doneMsg); });
+      } else copyToClipboardSnvrFallback(clip, doneMsg);
+    }
+    function copyToClipboardSnvrFallback(clipText, doneMsg) {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = clipText;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        alert(doneMsg || t("js.copied"));
+      } catch (_e) {
+        alert(t("js.copyFailed"));
+      }
+    }
+    async function loadWalletSnvrInfo() {
+      var contractEl = document.getElementById("walletSnvrContract");
+      var hashEl = document.getElementById("walletSnvrCodeHash");
+      var decEl = document.getElementById("walletSnvrDecimals");
+      var hintEl = document.getElementById("walletSnvrChainHint");
+      var errEl = document.getElementById("walletSnvrLoadErr");
+      if (!contractEl || !hashEl) return;
+      contractEl.placeholder = "Loading…";
+      hashEl.placeholder = "Loading…";
+      if (errEl) {
+        errEl.classList.add("hidden");
+        errEl.textContent = "";
+      }
+      var r = await api("/wallet/chain-config");
+      var d = r.data || {};
+      var addr = d.snvr_address || null;
+      var hash = d.snvr_code_hash || null;
+      var dec = Number(d.snvr_decimals != null ? d.snvr_decimals : 9);
+      if (!Number.isFinite(dec) || dec < 0) dec = 9;
+      contractEl.value = addr || "";
+      hashEl.value = hash || "";
+      contractEl.placeholder = addr ? "" : "(none)";
+      hashEl.placeholder = hash ? "" : "(none)";
+      if (decEl) decEl.textContent = String(dec);
+      if (hintEl) {
+        hintEl.textContent = d.chain_id
+          ? "Chain ID: " + d.chain_id + " — make sure Keplr Secret Network matches this chain id."
+          : "";
+      }
+      if (!r.ok || !addr) {
+        if (errEl) {
+          errEl.textContent =
+            "Could not load SNVR token from backend. Check API URL after login and snvr_token on the server.";
+          errEl.classList.remove("hidden");
+        }
+      }
+    }
+
+    async function loadHistory() {
+      const u = getUser();
+      if (!u) return;
+      const el = document.getElementById("txHistory");
+      if (!el) return;
+      el.textContent = "Loading...";
+      const r = await api(`/wallet/history?platform=${u.platform}&platform_user_id=${encodeURIComponent(u.platform_user_id)}&limit=50`);
+      if (!r.ok) {
+        el.textContent = r.data?.error || "Could not load history.";
+        return;
+      }
+      const items = r.data.items || [];
+      if (!items.length) {
+        el.textContent = "No activity yet.";
+        return;
+      }
+      const rows = items.map(function (tx) {
+        const dir = tx.direction === "out" ? "Sent" : tx.direction === "in" ? "Received" : "Other";
+        const sign = tx.direction === "out" ? "-" : tx.direction === "in" ? "+" : "";
+        const feeText = tx.fee ? ` (fee ${tx.fee})` : "";
+        const cp = tx.counterparty_key || "";
+        const when = new Date(tx.created_at).toLocaleString();
+        return `<div style="padding:4px 0;border-bottom:1px solid var(--border);">
+  <div><strong>${dir}</strong> · ${tx.type} · ${sign}${tx.amount}${feeText}</div>
+  <div style="font-size:0.8rem;color:var(--muted);">${when}${cp ? " · To/From: " + cp : ""}</div>
+</div>`;
+      });
+      el.innerHTML = rows.join("");
+    }
+
+    document.getElementById("btnTestConnection").onclick = async function () {
+      const url = (document.getElementById("apiUrl").value || DEFAULT_API_URL).replace(/\/$/, "");
+      const el = document.getElementById("connectionTestResult");
+      el.classList.remove("hidden");
+      el.textContent = "Connecting...";
+      el.className = "search-hint";
+      try {
+        const res = await fetch(url + "/health");
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.service === "snvr-backend") {
+          el.textContent = "✓ Backend connected!";
+          el.className = "success";
+        } else {
+          el.textContent = "Unexpected response (status " + res.status + ")";
+          el.className = "error";
+        }
+      } catch (e) {
+        el.textContent = "Connection failed: " + (e.message || "Failed to fetch") + ". Run the backend; open via http://localhost (not file://).";
+        el.className = "error";
+      }
+    };
+
+    document.getElementById("btnLogin").onclick = async () => {
+      const code = String(document.getElementById("linkCode").value || "").replace(/\D/g, "").slice(0, 6);
+      const errEl = document.getElementById("loginError");
+      errEl.classList.add("hidden");
+      if (!code || code.length !== 6) {
+        errEl.textContent = "Enter the 6-digit code from the bot. (Spaces and hyphens are stripped when pasting)";
+        errEl.classList.remove("hidden");
+        return;
+      }
+      const r = await api("/auth/link", { code });
+      if (!r.ok) { errEl.textContent = r.data?.error || "Sign-in failed"; errEl.classList.remove("hidden"); return; }
+      const apiBase = getApiUrl();
+      setUser(r.data.platform, r.data.platform_user_id, apiBase);
+      if (document.getElementById("apiUrl")) document.getElementById("apiUrl").value = apiBase;
+      showScreen(false);
+    };
+
+    function closeSidebarMobile() {
+      var sb = document.getElementById("sidebar");
+      var ov = document.getElementById("sidebarOverlay");
+      if (sb) sb.classList.remove("open");
+      if (ov) ov.classList.remove("open");
+    }
+    document.getElementById("btnMenuToggle").onclick = function () {
+      document.getElementById("sidebar").classList.toggle("open");
+      document.getElementById("sidebarOverlay").classList.toggle("open");
+    };
+    document.getElementById("sidebarOverlay").onclick = closeSidebarMobile;
+    var btnHeaderHome = document.getElementById("btnHeaderHome");
+    if (btnHeaderHome) btnHeaderHome.onclick = function () {
+      if (!getUser()) {
+        showScreen(true);
+        return;
+      }
+      goToView("chat");
+      try {
+        var listTop = document.getElementById("chatRoomList");
+        if (listTop) listTop.scrollIntoView({ block: "start", behavior: "smooth" });
+      } catch (_e) { /* ignore */ }
+    };
+    var sendTargetPlatformKey = null;
+    function goToView(viewName) {
+      if (!viewName) return;
+      if (viewName !== "send") sendTargetPlatformKey = null;
+      showView(viewName);
+      enforceMobileScrollLayout();
+      if (window.innerWidth <= 768) closeSidebarMobile();
+    }
+    (function initNav() {
+      var btns = document.querySelectorAll(".menu-item[data-view]");
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].onclick = function () { goToView(this.getAttribute("data-view")); };
+      }
+    })();
+    var nightMode = document.getElementById("nightMode");
+    if (nightMode) nightMode.onchange = function () {
+      var isDark = nightMode.checked;
+      document.body.classList.toggle("light", !isDark);
+      localStorage.setItem("snvr_night_mode", isDark ? "1" : "0");
+    };
+
+    var deferredInstallPrompt = null;
+    function isStandalone() { return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true; }
+    function updateAddToHomeVisibility() {
+      var hide = isStandalone();
+      [ "btnAddToHome", "btnAddToHomeMobile" ].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.toggle("hidden", hide);
+      });
+    }
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      updateAddToHomeVisibility();
+    });
+    window.addEventListener("appinstalled", function () { deferredInstallPrompt = null; updateAddToHomeVisibility(); });
+    function doAddToHome() {
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.then(function (r) { if (r.outcome === "accepted") deferredInstallPrompt = null; updateAddToHomeVisibility(); });
+      } else {
+        alert(t("js.addHomeHelp"));
+      }
+    }
+    ["btnAddToHome", "btnAddToHomeHeader", "btnAddToHomeMobile", "btnAddToHomeSettings"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.onclick = doAddToHome;
+    });
+
+    document.getElementById("btnProfileSave").onclick = async function () {
+      const u = getUser();
+      if (!u) return;
+      const displayName = document.getElementById("profileDisplayName").value.trim();
+      const statusText = document.getElementById("profileStatus").value.trim();
+      const fileInput = document.getElementById("profilePhoto");
+      const resultEl = document.getElementById("profileSaveResult");
+      resultEl.classList.remove("hidden");
+      let avatar = undefined;
+      if (fileInput.files && fileInput.files[0]) {
+        const file = fileInput.files[0];
+        if (file.size > 250000) { resultEl.textContent = "Please choose an image under ~200KB."; resultEl.className = "error"; return; }
+        avatar = await new Promise(function (resolve, reject) {
+          const r = new FileReader();
+          r.onload = function () { resolve(r.result); };
+          r.onerror = reject;
+          r.readAsDataURL(file);
+        });
+      }
+      const body = { platform: u.platform, platform_user_id: u.platform_user_id, display_name: displayName || null, status_text: statusText || null };
+      if (avatar !== undefined) body.avatar = avatar;
+      const r = await api("/profile", body, "PUT");
+      if (r.ok) {
+        resultEl.textContent = "Saved.";
+        resultEl.className = "success";
+        refreshProfileSidebar();
+      } else {
+        resultEl.textContent = r.data?.error || "Save failed";
+        resultEl.className = "error";
+      }
+    };
+
+    (function initWalletSnvrCopyButtons() {
+      var btnC = document.getElementById("btnCopySnvrContract");
+      if (btnC) {
+        btnC.onclick = function () {
+          var v = document.getElementById("walletSnvrContract");
+          copyToClipboardSnvr(v ? v.value : "", "SNVR contract address copied.");
+        };
+      }
+      var btnH = document.getElementById("btnCopySnvrCodeHash");
+      if (btnH) {
+        btnH.onclick = function () {
+          var v = document.getElementById("walletSnvrCodeHash");
+          copyToClipboardSnvr(v ? v.value : "", "Code hash copied.");
+        };
+      }
+    })();
+
+    document.getElementById("btnKeplrConnect").onclick = async function () {
+      const u = getUser();
+      const statusEl = document.getElementById("keplrStatus");
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+      if (!u) { statusEl.textContent = "Please sign in first."; statusEl.classList.remove("hidden"); statusEl.className = "error"; return; }
+      statusEl.classList.remove("hidden");
+      statusEl.textContent = "Connecting...";
+      statusEl.className = "search-hint";
+      setKeplrFlowStatus("connecting");
+      try {
+        const cfg = await api("/wallet/chain-config");
+        if (!cfg.ok || !cfg.data.snvr_address || !cfg.data.chain_id) {
+          statusEl.textContent = "SNVR not deployed yet. Use after mainnet deployment.";
+          statusEl.className = "error";
+          return;
+        }
+        const keplr = window.keplr;
+        if (!keplr) {
+          statusEl.textContent = isMobile
+            ? "현재 브라우저에서는 Keplr가 감지되지 않습니다. (텔레그램/일반 모바일 브라우저 제한) 아래 'Mobile manual link'에 secret 주소만 입력하거나, Keplr dApp 브라우저에서 다시 시도하세요."
+            : "Please install Keplr extension: https://www.keplr.app";
+          statusEl.className = "error";
+          try {
+            var manual = document.getElementById("manualSecretAddress");
+            if (manual) manual.focus();
+          } catch (_e) { /* ignore */ }
+          return;
+        }
+        const chainId = cfg.data.chain_id;
+        const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
+        const snvrAddr = cfg.data.snvr_address;
+        const codeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
+        statusEl.textContent = "Requesting wallet access...";
+        await withTimeout(keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT");
+        const signer = keplr.getOfflineSigner(chainId);
+        const accounts = await withTimeout(signer.getAccounts(), 12000, "KEPLR_ACCOUNT_TIMEOUT");
+        const secretAddress = accounts[0]?.address;
+        if (!secretAddress) {
+          statusEl.textContent = "Could not get address from Keplr.";
+          statusEl.className = "error";
+          return;
+        }
+        const prevCreds = getCreds();
+        if (prevCreds?.secret_address && prevCreds.secret_address !== secretAddress) {
+          statusEl.textContent =
+            "Keplr selected a different address. To prevent 0-balance mistakes, switching is blocked. " +
+            "Please change Keplr account back to your linked address and try again.\n\n" +
+            "Linked: " + prevCreds.secret_address + "\n" +
+            "Keplr: " + secretAddress;
+          statusEl.className = "error";
+          setKeplrFlowStatus("cancel_address_mismatch");
+          return;
+        }
+        let permit = null;
+        statusEl.textContent = "Waiting permit approval... (up to 45s)";
+        try {
+          permit = await withTimeout(
+            createBalancePermit(keplr, chainId, secretAddress, snvrAddr),
+            45000,
+            "PERMIT_TIMEOUT"
+          );
+        } catch (_e) {
+          // One retry: mobile wallet return can be slow.
+          try {
+            permit = await withTimeout(
+              createBalancePermit(keplr, chainId, secretAddress, snvrAddr),
+              45000,
+              "PERMIT_TIMEOUT_RETRY"
+            );
+          } catch (_e2) {
+            permit = null;
+          }
+        }
+        if (!permit) {
+          statusEl.textContent = "Could not finish wallet auth. Permit approval is required.";
+          statusEl.className = "error";
+          setKeplrFlowStatus("error_no_auth");
+          return;
+        } else {
+          setCreds(secretAddress, "", permit);
+          if (permit) {
+            let linkR = await syncServerWalletLink(secretAddress, "", permit);
+            if (!linkR.ok && !linkR.skipped) {
+              linkR = await syncServerWalletLink(secretAddress, "", permit);
+            }
+            if (!linkR.ok && !linkR.skipped) {
+              statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
+              statusEl.className = "error";
+              setKeplrFlowStatus("error_server_link_sync");
+              return;
+            }
+            // Verify server side really has wallet auth after connect.
+            const verifyR = await api(
+              "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
+              "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
+            );
+            if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
+              // One more forced sync before continuing.
+              await syncServerWalletLink(secretAddress, "", permit);
+              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+            }
+          }
+          statusEl.textContent = "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready)";
+          statusEl.className = "success";
+          setKeplrFlowStatus("connected");
+        }
+        if (isTelegramInAppBrowser()) {
+          statusEl.textContent += "  You can return to Telegram now.";
+        }
+        try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
+        loadViewingKey();
+        refreshWalletLinkStatusUi();
+        if (permit) await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+        refreshProfileSidebar();
+        tryAutoReturnAfterConnect();
+      } catch (e) {
+        statusEl.textContent = "Error: " + (e.message || String(e));
+        statusEl.className = "error";
+        setKeplrFlowStatus("error");
+      }
+    };
+
+    document.getElementById("btnKeplrReconnect").onclick = function () {
+      document.getElementById("btnKeplrConnect").click();
+    };
+
+    document.getElementById("btnRotateViewingKey").onclick = async function () {
+      const statusEl = document.getElementById("keplrStatus");
+      statusEl.classList.remove("hidden");
+      statusEl.textContent = "Rotating viewing key… (sign in Keplr)";
+      statusEl.className = "search-hint";
+      try {
+        const cfg = await api("/wallet/chain-config");
+        const chainId = cfg.data?.chain_id || cfg.chain_id;
+        const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
+        const snvrAddr = cfg.data?.snvr_address || cfg.snvr_address;
+        const codeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
+        if (!chainId || !lcdUrl || !snvrAddr || !codeHash) {
+          statusEl.textContent = "SNVR not deployed yet. Use after mainnet deployment.";
+          statusEl.className = "error";
+          return;
+        }
+        const keplr = window.keplr;
+        if (!keplr) {
+          statusEl.textContent = "Please install the Keplr extension.";
+          statusEl.className = "error";
+          return;
+        }
+        await keplr.enable(chainId);
+        const signer = keplr.getOfflineSigner(chainId);
+        const accounts = await signer.getAccounts();
+        const secretAddress = accounts[0]?.address;
+        if (!secretAddress) {
+          statusEl.textContent = "Could not get address from Keplr.";
+          statusEl.className = "error";
+          return;
+        }
+        const newKey = btoa(String.fromCharCode.apply(null, crypto.getRandomValues(new Uint8Array(32))));
+        const enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
+        const SecretNetworkClient = await loadSecretJsClientCtor();
+        const client = new SecretNetworkClient({
+          url: lcdUrl,
+          chainId: chainId,
+          wallet: signer,
+          walletAddress: secretAddress,
+          encryptionUtils: enigmaUtils || undefined,
+        });
+        await client.tx.snip20.setViewingKey({
+          sender: secretAddress,
+          contract_address: snvrAddr,
+          code_hash: codeHash,
+          msg: { set_viewing_key: { key: newKey } },
+        }, { gasLimit: 200_000 });
+        setCreds(secretAddress, newKey);
+        statusEl.textContent = "Viewing key rotated. Old key is invalid.";
+        statusEl.className = "success";
+        loadViewingKey();
+        refreshWalletLinkStatusUi();
+        await enableBotBalanceSyncOnServer(secretAddress, newKey);
+        refreshProfileSidebar();
+      } catch (e) {
+        statusEl.textContent = "Error: " + (e.message || String(e));
+        statusEl.className = "error";
+      }
+    };
+
+    var btnRefresh = document.getElementById("btnRefreshBalance");
+    if (btnRefresh) btnRefresh.onclick = refreshBalance;
+
+    document.getElementById("btnSend").onclick = async () => {
+      const u = getUser();
+      const to = document.getElementById("sendTo").value.trim();
+      const amount = parseFloat(document.getElementById("sendAmount").value);
+      const el = document.getElementById("sendResult");
+      el.classList.remove("hidden");
+      if (!to || !amount || amount <= 0) { el.textContent = "Enter recipient and amount."; el.className = "error"; return; }
+      const body = { platform: u.platform, from_platform_user_id: u.platform_user_id, amount };
+      if (sendTargetPlatformKey) { body.to_platform_key = sendTargetPlatformKey; sendTargetPlatformKey = null; }
+      else if (/^\d{6}$/.test(to)) body.to_one_time_code = to;
+      else body.to_username = to.replace(/^@/, "");
+      const r = await api("/wallet/send", bodyWithCreds(body));
+      var failMsg = r.data?.message || r.data?.error || "Failed";
+      if (!r.ok && hasWalletAuthCreds(getCreds()) && /wallet|지갑|Keplr|linked|연결|sender|not connected/i.test(String(failMsg))) {
+        failMsg += " — If you just connected, open ⚙️ Settings and tap Connect Keplr once more.";
+      }
+      el.textContent = r.ok ? `✅ Sent. Balance: ${r.data.from_balance}` : failMsg;
+      el.className = r.ok ? "success" : "error";
+      if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
+      if (!r.ok && r.data?.error === "viewing_key_invalid") el.textContent += " Tap Settings → Reconnect Keplr.";
+      if (!r.ok && r.data?.error === "permit_invalid") el.textContent += " Tap Settings → Reconnect Keplr to sign a new permit.";
+    };
+
+    document.getElementById("btnReceive").onclick = async () => {
+      const u = getUser();
+      const r = await api("/wallet/receive/generate", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+      const el = document.getElementById("receiveCode");
+      const urlWrap = document.getElementById("receiveUrlWrap");
+      const urlEl = document.getElementById("receiveUrl");
+      el.classList.remove("hidden");
+      el.textContent = r.ok ? `Code: ${r.data.one_time_code} (valid ${r.data.expires_in_sec}s)` : (r.data?.error || "Failed");
+      el.className = r.ok ? "success" : "error";
+      if (r.ok && r.data.receive_url) {
+        urlEl.href = r.data.receive_url;
+        urlEl.textContent = r.data.receive_url;
+        urlWrap.classList.remove("hidden");
+      } else {
+        urlWrap.classList.add("hidden");
+      }
+    };
+    document.getElementById("btnCopyReceiveUrl").onclick = function () {
+      const a = document.getElementById("receiveUrl");
+      if (!a || !a.href) return;
+      navigator.clipboard.writeText(a.href).then(function () { alert(t("js.linkCopied")); }).catch(function () { alert(t("js.copyFailedShort")); });
+    };
+
+    document.getElementById("btnSwap").onclick = async () => {
+      const u = getUser();
+      const to = document.getElementById("swapTo").value.trim();
+      const amount = parseFloat(document.getElementById("swapAmount").value);
+      const el = document.getElementById("swapResult");
+      el.classList.remove("hidden");
+      if (!to || !amount || amount <= 0) { el.textContent = "Enter recipient and amount."; el.className = "error"; return; }
+      const r = await api("/swap", bodyWithCreds({ platform: u.platform, from_platform_user_id: u.platform_user_id, amount, recipient: to }));
+      el.textContent = r.ok ? `✅ Swap done. Recipient receives: ${r.data.to_receive}` : (r.data?.message || r.data?.error || "Failed");
+      el.className = r.ok ? "success" : "error";
+      if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
+      if (!r.ok && r.data?.error === "viewing_key_invalid") el.textContent += " Tap Settings → Reconnect Keplr.";
+      if (!r.ok && r.data?.error === "permit_invalid") el.textContent += " Tap Settings → Reconnect Keplr to sign a new permit.";
+    };
+
+    function setMixResult(text, ok) {
+      const el = document.getElementById("mixResult");
+      el.classList.remove("hidden");
+      el.textContent = text;
+      el.className = ok ? "success" : "error";
+    }
+    const MIX_TICKET_KEY = "snvr_routing_tickets";
+    function sleepMs(ms) {
+      return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    }
+    /** After deposit, LCD often lags a few seconds before ticket_status shows the balance. */
+    async function scheduleMixPendingRefetch() {
+      var delays = [0, 2500, 6000, 15000];
+      for (var i = 0; i < delays.length; i++) {
+        if (delays[i] > 0) await sleepMs(delays[i]);
+        await refreshMixPending();
+      }
+    }
+    async function sha256Hex(text) {
+      const bytes = new TextEncoder().encode(text);
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    function getRoutingTickets() {
+      try {
+        const v = JSON.parse(localStorage.getItem(MIX_TICKET_KEY) || "[]");
+        return Array.isArray(v) ? v : [];
+      } catch { return []; }
+    }
+    function setRoutingTickets(arr) {
+      localStorage.setItem(MIX_TICKET_KEY, JSON.stringify(arr || []));
+    }
+    function addRoutingTicket(t) {
+      const arr = getRoutingTickets();
+      arr.unshift(t);
+      setRoutingTickets(arr.slice(0, 20));
+    }
+    function markTicketClaimed(ticketHash) {
+      const arr = getRoutingTickets();
+      for (const t of arr) {
+        if (t.ticket_hash === ticketHash) t.claimed = true;
+      }
+      setRoutingTickets(arr);
+    }
+    function pickClaimableTicketByAmount(amountRaw) {
+      const arr = getRoutingTickets();
+      return arr.find((t) => !t.claimed && String(t.amount_raw) === String(amountRaw)) || null;
+    }
+    function findTicketByAmount(amountRaw, { claimedOnly } = {}) {
+      const arr = getRoutingTickets();
+      return (
+        arr.find((t) => {
+          if (String(t.amount_raw) !== String(amountRaw)) return false;
+          if (claimedOnly === true) return !!t.claimed;
+          if (claimedOnly === false) return !t.claimed;
+          return true;
+        }) || null
+      );
+    }
+    function renderTicketList() {
+      const el = document.getElementById("mixTicketList");
+      if (!el) return;
+      const arr = getRoutingTickets();
+      if (!arr.length) {
+        el.textContent = "Local routing tickets: none";
+        return;
+      }
+      const rows = arr.slice(0, 5).map((t, i) => {
+        const dt = new Date(Number(t.created_at || Date.now())).toLocaleTimeString();
+        const st = t.claimed ? "claimed" : "pending";
+        return `${i + 1}) ${t.amount_raw} raw | ${st} | ${dt}`;
+      });
+      el.textContent = "Local routing tickets:\n" + rows.join("\n");
+    }
+    function humanToRaw(amount, decimals) {
+      const n = Number(amount);
+      if (!Number.isFinite(n) || n <= 0) return null;
+      return String(Math.floor(n * Math.pow(10, Number(decimals || 9))));
+    }
+    async function loadSecretJsClientCtor() {
+      const mod = await import("https://esm.sh/secretjs@1.22.1");
+      const ctor =
+        mod?.SecretNetworkClient ||
+        mod?.default?.SecretNetworkClient ||
+        mod?.default;
+      if (!ctor) throw new Error("Failed to load SecretNetworkClient from secretjs.");
+      return ctor;
+    }
+    async function createBalancePermit(keplr, chainId, signerAddress, tokenAddress) {
+      if (!keplr || !keplr.signAmino) return null;
+      const permitName = "snvr-balance-" + Date.now();
+      // Prefer SecretJS helper when available.
+      try {
+        const mod = await import("https://esm.sh/secretjs@1.22.1");
+        const signFn = mod?.utils?.accessControl?.permit?.sign;
+        if (typeof signFn === "function") {
+          const p = await signFn(
+            signerAddress,
+            chainId,
+            permitName,
+            [tokenAddress],
+            ["owner", "balance"],
+            false
+          );
+          if (p && p.params && p.signature) {
+            const now2 = Date.now();
+            p.issued_at = now2;
+            p.expires_at = now2 + PERMIT_TTL_MS;
+            return p;
+          }
+        }
+      } catch (_eSignHelper) {
+        /* fallback to signAmino */
+      }
+      const signDoc = {
+        chain_id: chainId,
+        account_number: "0",
+        sequence: "0",
+        fee: { amount: [{ denom: "uscrt", amount: "0" }], gas: "1" },
+        msgs: [{
+          type: "query_permit",
+          value: {
+            permit_name: permitName,
+            chain_id: chainId,
+            allowed_tokens: [tokenAddress],
+            permissions: ["owner", "balance"],
+          },
+        }],
+        memo: "",
+      };
+      const signed = await keplr.signAmino(chainId, signerAddress, signDoc, {
+        preferNoSetFee: true,
+        preferNoSetMemo: true,
+      });
+      const now = Date.now();
+      return {
+        params: signDoc.msgs[0].value,
+        signature: signed?.signature,
+        issued_at: now,
+        expires_at: now + PERMIT_TTL_MS,
+      };
+    }
+    async function tryAutoRecoverPermitOnPc() {
+      try {
+        const u = getUser();
+        if (!u) return false;
+        const c = getCreds() || {};
+        if (c.permit) return true;
+        const ua = String(navigator.userAgent || "");
+        if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return false;
+        if (!window.keplr) return false;
+        const cfg = await api("/wallet/chain-config");
+        const chainId = cfg.data?.chain_id || cfg.chain_id;
+        const snvrAddr = cfg.data?.snvr_address || cfg.snvr_address;
+        if (!chainId || !snvrAddr) return false;
+        await withTimeout(window.keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT_AUTO");
+        const signer = window.keplr.getOfflineSigner(chainId);
+        const accts = await withTimeout(signer.getAccounts(), 12000, "KEPLR_ACCOUNT_TIMEOUT_AUTO");
+        const secretAddress = String(accts?.[0]?.address || "").trim();
+        if (!secretAddress) return false;
+        const linkedAddr = String(c.secret_address || "").trim();
+        if (linkedAddr && linkedAddr !== secretAddress) return false;
+        const permit = await withTimeout(
+          createBalancePermit(window.keplr, chainId, secretAddress, snvrAddr),
+          45000,
+          "PERMIT_TIMEOUT_AUTO"
+        );
+        if (!permit) return false;
+        setCreds(secretAddress, "", permit);
+        await syncServerWalletLink(secretAddress, "", permit);
+        await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+        return true;
+      } catch (_e) {
+        return false;
+      }
+    }
+    async function getMixClient() {
+      const cfg = await api("/wallet/chain-config");
+      const chainId = cfg.data?.chain_id || cfg.chain_id;
+      const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
+      const snvrAddr = cfg.data?.snvr_address || cfg.snvr_address;
+      const snvrCodeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
+      const mixerAddr = cfg.data?.mixer_address || cfg.mixer_address;
+      const mixerCodeHash = cfg.data?.mixer_code_hash || cfg.mixer_code_hash;
+      const decimals = Number(cfg.data?.snvr_decimals ?? 9);
+      if (!chainId || !lcdUrl || !snvrAddr || !snvrCodeHash || !mixerAddr || !mixerCodeHash) {
+        throw new Error("Chain config is incomplete. Check deployment config.");
+      }
+      const keplr = window.keplr;
+      if (!keplr) throw new Error("Keplr extension not found.");
+      await keplr.enable(chainId);
+      const signer = keplr.getOfflineSigner(chainId);
+      const accounts = await signer.getAccounts();
+      const sender = accounts[0]?.address;
+      if (!sender) throw new Error("No account from Keplr.");
+      const enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
+      const SecretNetworkClient = await loadSecretJsClientCtor();
+      const client = new SecretNetworkClient({
+        url: lcdUrl,
+        chainId,
+        wallet: signer,
+        walletAddress: sender,
+        encryptionUtils: enigmaUtils || undefined,
+      });
+      return { client, sender, snvrAddr, snvrCodeHash, mixerAddr, mixerCodeHash, decimals };
+    }
+    async function refreshMixPending() {
+      const el = document.getElementById("mixPending");
+      if (!el) return;
+      try {
+        const allTickets = getRoutingTickets();
+        // Only query chain for an *unclaimed* local ticket. Using allTickets[0] when everything
+        // was claimed made the UI look "stuck" on an old claimed ticket after refresh.
+        const ticket = allTickets.find((t) => !t.claimed);
+        if (!ticket?.ticket_hash) {
+          el.textContent = allTickets.length
+            ? "Pending: no unclaimed local tickets (see list below). Start a new Deposit for another route."
+            : "Pending: no local routing ticket (deposit first).";
+          renderTicketList();
+          return;
+        }
+        const { client, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
+        const q = await client.query.compute.queryContract({
+          contract_address: mixerAddr,
+          code_hash: mixerCodeHash,
+          query: { ticket_status: { ticket_hash: ticket.ticket_hash } },
+        });
+        const raw = Number(q?.amount || "0");
+        const human = raw / Math.pow(10, decimals);
+        const mins = q?.last_deposit_at ? Math.max(0, Math.floor((Date.now() / 1000 - Number(q.last_deposit_at)) / 60)) : 0;
+        const claimed = !!q?.claimed;
+        const lastDep = Number(q?.last_deposit_at || 0);
+        const recentLocal =
+          Number(ticket.created_at || 0) > 0 && Date.now() - Number(ticket.created_at) < 180000;
+        if (!claimed && raw === 0 && lastDep === 0 && recentLocal) {
+          el.textContent =
+            "Pending: confirming on chain… (can take seconds. Tap Refresh chain status or reopen Routing.)";
+          renderTicketList();
+          return;
+        }
+        el.textContent = `Pending: ${human} SNVR | Last deposit: ${mins} min ago | Claimed: ${claimed ? "yes" : "no"}`;
+        if (claimed) markTicketClaimed(ticket.ticket_hash);
+        renderTicketList();
+      } catch (_e) {
+        el.textContent = "Pending: unavailable (check network/LCD or Keplr)";
+        renderTicketList();
+      }
+    }
+    async function mixDeposit() {
+      const amount = parseFloat(document.getElementById("mixAmount").value);
+      if (!amount || amount <= 0) return setMixResult("Enter a valid amount.", false);
+      try {
+        const { client, sender, snvrAddr, snvrCodeHash, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
+        const amountRaw = humanToRaw(amount, decimals);
+        if (!amountRaw) return setMixResult("Invalid amount.", false);
+        const ticketSecret = "rt-" + Date.now() + "-" + Math.random().toString(16).slice(2) + "-" + sender;
+        const ticketHash = await sha256Hex(ticketSecret);
+        const tx = await client.tx.compute.executeContract({
+          sender,
+          contract_address: snvrAddr,
+          code_hash: snvrCodeHash,
+          msg: {
+            send: {
+              recipient: mixerAddr,
+              recipient_code_hash: mixerCodeHash,
+              amount: amountRaw,
+              memo: ticketHash,
+            },
+          },
+        }, { gasLimit: 320000 });
+        const txHash = tx?.transactionHash || tx?.hash || "ok";
+        localStorage.setItem("snvr_mix_last_deposit_at", String(Date.now()));
+        addRoutingTicket({
+          ticket_secret: ticketSecret,
+          ticket_hash: ticketHash,
+          amount_raw: amountRaw,
+          created_at: Date.now(),
+          claimed: false,
+        });
+        setMixResult(`Deposit submitted. Tx: ${txHash}`, true);
+        refreshBalance();
+        refreshProfileSidebar();
+        void scheduleMixPendingRefetch();
+      } catch (e) {
+        setMixResult(`Deposit failed: ${e.message || String(e)}`, false);
+      }
+    }
+    async function mixClaim(requireDelay) {
+      const to = document.getElementById("mixTo").value.trim();
+      const amount = parseFloat(document.getElementById("mixAmount").value);
+      if (!to || !to.startsWith("secret1")) return setMixResult("Recipient must be a secret1... address.", false);
+      if (!amount || amount <= 0) return setMixResult("Enter a valid amount.", false);
+      if (requireDelay) {
+        const last = Number(localStorage.getItem("snvr_mix_last_deposit_at") || 0);
+        const elapsedMin = last ? Math.floor((Date.now() - last) / 60000) : 999999;
+        if (elapsedMin < 30) {
+          const ok = confirm(t("js.mixWaitEarly", { min: elapsedMin }));
+          if (!ok) return setMixResult("Cancelled: wait longer before claim for better privacy.", false);
+        }
+      } else {
+        const accepted = confirm(t("js.mixInstant"));
+        if (!accepted) return setMixResult("Cancelled: Privacy Recommended is advised.", false);
+      }
+      try {
+        const { client, sender, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
+        const amountRaw = humanToRaw(amount, decimals);
+        const ticket = pickClaimableTicketByAmount(amountRaw);
+        if (!ticket?.ticket_secret) {
+          const claimedSame = findTicketByAmount(amountRaw, { claimedOnly: true });
+          if (claimedSame)
+            return setMixResult(
+              "This amount was already claimed on this device (local ticket marked claimed). Do a new Routing deposit for a new ticket.",
+              false
+            );
+          return setMixResult("No claimable local ticket for this amount. Deposit first on this device.", false);
+        }
+        const tx = await client.tx.compute.executeContract({
+          sender,
+          contract_address: mixerAddr,
+          code_hash: mixerCodeHash,
+          msg: { claim: { recipient: to, amount: amountRaw, ticket_secret: ticket.ticket_secret } },
+        }, { gasLimit: 320000 });
+        const txHash = tx?.transactionHash || tx?.hash || "ok";
+        markTicketClaimed(ticket.ticket_hash);
+        setMixResult(`Claim submitted. Tx: ${txHash}`, true);
+        refreshBalance();
+        refreshProfileSidebar();
+        refreshMixPending();
+      } catch (e) {
+        setMixResult(`Claim failed: ${e.message || String(e)}`, false);
+      }
+    }
+    document.getElementById("btnMixDeposit").onclick = mixDeposit;
+    document.getElementById("btnMixClaimRecommended").onclick = () => mixClaim(true);
+    document.getElementById("btnMixClaimInstant").onclick = () => mixClaim(false);
+    var btnMixRef = document.getElementById("btnMixRefreshPending");
+    if (btnMixRef) btnMixRef.onclick = function () { void refreshMixPending(); };
+
+    let currentRoomId = null;
+    let currentOtherKey = null;
+    let currentAutoDeleteSec = 0;
+    function renderChatThreadPlaceholder() {
+      var msgEl = document.getElementById("chatMessages");
+      var titleEl = document.getElementById("chatThreadTitle");
+      var statusEl = document.getElementById("chatThreadStatus");
+      var errP = document.getElementById("chatSendError");
+      if (!msgEl) return;
+      if (currentRoomId) return;
+      if (titleEl) titleEl.textContent = t("chat.selectConversation");
+      if (statusEl) statusEl.textContent = "—";
+      var btnDel = document.getElementById("btnDeleteChat");
+      var btnSend = document.getElementById("btnSendFromChat");
+      if (btnDel) btnDel.style.display = "none";
+      if (btnSend) btnSend.style.display = "none";
+      var hint = document.getElementById("autoDeleteHint");
+      if (hint) hint.style.display = "none";
+      if (errP) { errP.classList.add("hidden"); errP.textContent = ""; }
+      msgEl.innerHTML =
+        '<div class="chat-empty-state" role="status">' +
+        '<p class="chat-empty-title">' + escapeHtml(t("chat.emptyTitle")) + "</p>" +
+        '<p class="chat-empty-text">' + escapeHtml(t("chat.emptyText")) + "</p>" +
+        '<ul class="chat-empty-list">' +
+        "<li>" + escapeHtml(t("chat.emptyLi1")) + "</li>" +
+        "<li>" + escapeHtml(t("chat.emptyLi2")) + "</li>" +
+        "</ul></div>";
+    }
+    async function openChatList() {
+      const u = getUser();
+      const r = await api("/chat/rooms?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+      const el = document.getElementById("chatRoomList");
+      const hint = document.getElementById("chatListHint");
+      if (!el) return;
+      if (!r.ok || !r.data.rooms.length) {
+        el.innerHTML = "<p class=\"search-hint\">" + escapeHtml(t("chat.noRooms")) + "</p>";
+        if (hint) hint.classList.add("hidden");
+        return;
+      }
+      if (hint) hint.classList.remove("hidden");
+      var delTitle = escapeHtml(t("chat.btnDeleteChatTitle"));
+      var delLabel = escapeHtml(t("chat.roomListDelete"));
+      el.innerHTML = r.data.rooms.map(function (room) {
+        const last = room.last_message ? room.last_message.text.slice(0, 35) + (room.last_message.text.length > 35 ? "…" : "") : t("chat.previewStart");
+        const auto = room.auto_delete_after_sec || 0;
+        const m = room.other_key.match(/@?(\w)/);
+        const initial = (m ? m[1] : room.other_key.slice(-1) || "?").toString().toUpperCase().slice(0, 1);
+        const timeStr = room.last_message ? formatTimeAgo(room.last_message.created_at) : "";
+        return '<div class="chat-list-item" data-room-id="' + room.room_id + '" data-other="' + room.other_key.replace(/"/g, "&quot;") + '" data-auto="' + auto + '"><div class="chat-list-avatar">' + initial + '</div><div class="chat-list-body"><div class="chat-list-name">' + escapeHtml(room.other_key) + '</div><div class="chat-list-preview">' + escapeHtml(last) + '</div></div><div class="chat-list-right"><span class="chat-list-time">' + timeStr + '</span><button type="button" class="chat-list-del" data-room-id="' + room.room_id + '" title="' + delTitle + '">' + delLabel + "</button></div></div>";
+      }).join("");
+      el.querySelectorAll(".chat-list-item").forEach(function (div) {
+        div.onclick = function (e) { if (!e.target.classList.contains("chat-list-del")) openThread(div.dataset.roomId, div.dataset.other, Number(div.dataset.auto || "0")); };
+      });
+      el.querySelectorAll(".chat-list-del").forEach(function (btn) {
+        btn.onclick = function (e) { e.stopPropagation(); e.preventDefault(); deleteRoomFromList(btn.dataset.roomId); };
+      });
+    }
+    let chatPollTimer = null;
+    function clearChatPoll() {
+      if (chatPollTimer) { clearInterval(chatPollTimer); chatPollTimer = null; }
+    }
+    function openThread(roomId, otherKey, autoSec) {
+      clearChatPoll();
+      currentRoomId = roomId;
+      currentOtherKey = otherKey;
+      currentAutoDeleteSec = Number(autoSec || 0);
+      var sendErr = document.getElementById("chatSendError");
+      if (sendErr) { sendErr.classList.add("hidden"); sendErr.textContent = ""; }
+      document.getElementById("chatThreadTitle").textContent = otherKey;
+      var statusEl = document.getElementById("chatThreadStatus");
+      if (statusEl) statusEl.textContent = "SNVR";
+      var sel = document.getElementById("chatAutoDelete");
+      if (sel) sel.value = String(currentAutoDeleteSec);
+      var hint = document.getElementById("autoDeleteHint");
+      if (hint) hint.style.display = currentAutoDeleteSec > 0 ? "block" : "none";
+      var btnDel = document.getElementById("btnDeleteChat");
+      var btnSend = document.getElementById("btnSendFromChat");
+      if (btnDel) btnDel.style.display = currentRoomId ? "block" : "none";
+      if (btnSend) btnSend.style.display = currentRoomId ? "block" : "none";
+      loadChatMessages();
+      chatPollTimer = setInterval(loadChatMessages, 3000);
+    }
+    async function loadChatMessages() {
+      if (!currentRoomId) return;
+      const u = getUser();
+      const r = await api("/chat/rooms/" + encodeURIComponent(currentRoomId) + "/messages?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+      var statusEl = document.getElementById("chatThreadStatus");
+      if (!r.ok) {
+        if (statusEl) statusEl.textContent = t("chat.loadError");
+        return;
+      }
+      if (statusEl) statusEl.textContent = "SNVR";
+      const list = (r.ok && r.data.messages) ? r.data.messages : [];
+      if (list.length === 0 && currentAutoDeleteSec > 0 && currentRoomId) {
+        currentRoomId = null;
+        currentOtherKey = null;
+        var btnDel2 = document.getElementById("btnDeleteChat");
+        var btnSend2 = document.getElementById("btnSendFromChat");
+        if (btnDel2) btnDel2.style.display = "none";
+        if (btnSend2) btnSend2.style.display = "none";
+        openChatList();
+        renderChatThreadPlaceholder();
+        return;
+      }
+      const mk = myKey();
+      const html = list.map(function (m) {
+        const isSystem = m.from_key === "system";
+        if (isSystem) {
+          const txt = (m.text != null) ? String(m.text) : "";
+          const timeStr = new Date(m.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+          return '<div class="msg msg-system"><div class="msg-text">' + escapeHtml(txt) + '</div><div class="meta"><span>' + timeStr + '</span></div></div>';
+        }
+        const isMine = m.from_key === mk;
+        const del = isMine ? '<span class="delete-btn" data-id="' + m.id + '" title="' + escapeHtml(t("chat.deleteMsg")) + '">[' + escapeHtml(t("chat.deleteMsg")) + "]</span>" : "";
+        const txt = (m.text != null) ? String(m.text) : "";
+        var safeTxt = (txt || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const copyBtn = '<span class="copy-btn" data-text="' + safeTxt + '" title="' + escapeHtml(t("chat.copy")) + '">[' + escapeHtml(t("chat.copy")) + "]</span>";
+        const timeStr = new Date(m.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        const check = isMine ? '<span class="check">✓</span>' : '';
+        return '<div class="msg ' + (isMine ? "mine" : "theirs") + '"><div class="msg-text">' + escapeHtml(txt) + '</div><div class="meta">' + copyBtn + del + check + '<span>' + timeStr + '</span></div></div>';
+      }).join("");
+      const msgEl = document.getElementById("chatMessages");
+      msgEl.innerHTML = html || "<p style='color:#8b949e'>" + escapeHtml(t("chat.noMsg")) + "</p>";
+      msgEl.querySelectorAll(".delete-btn").forEach(function (span) {
+        span.onclick = function (e) { e.stopPropagation(); deleteMessage(Number(span.dataset.id)); };
+      });
+      msgEl.querySelectorAll(".copy-btn").forEach(function (span) {
+        span.onclick = function (e) {
+          e.stopPropagation();
+          var clip = span.dataset.text || "";
+          if (clip && navigator.clipboard) navigator.clipboard.writeText(clip).then(function () { span.textContent = "[" + t("chat.copied") + "]"; setTimeout(function () { span.textContent = "[" + t("chat.copy") + "]"; }, 800); });
+        };
+      });
+      msgEl.scrollTop = msgEl.scrollHeight;
+    }
+    function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+    function formatTimeAgo(iso) {
+      const d = new Date(iso);
+      const now = new Date();
+      const diff = (now - d) / 1000;
+      if (diff < 60) return "just now";
+      if (diff < 3600) return Math.floor(diff / 60) + "m";
+      if (diff < 86400) return Math.floor(diff / 3600) + "h";
+      if (diff < 604800) return Math.floor(diff / 86400) + "d";
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+    async function deleteMessage(id) {
+      if (!confirm(t("js.deleteConfirm"))) return;
+      const u = getUser();
+      const q = "?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
+      const r = await api("/chat/messages/" + id + q, null, "DELETE");
+      if (r.ok) loadChatMessages();
+    }
+    async function deleteRoomFromList(roomId) {
+      if (!confirm(t("js.deleteRoomConfirm"))) return;
+      const u = getUser();
+      const r = await api("/chat/rooms/" + encodeURIComponent(roomId) + "?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id), null, "DELETE");
+      if (r.ok) {
+        if (currentRoomId === roomId) {
+          currentRoomId = null;
+          currentOtherKey = null;
+          var btnDel = document.getElementById("btnDeleteChat");
+          var btnSend = document.getElementById("btnSendFromChat");
+          if (btnDel) btnDel.style.display = "none";
+          if (btnSend) btnSend.style.display = "none";
+          var hint = document.getElementById("autoDeleteHint");
+          if (hint) hint.style.display = "none";
+          renderChatThreadPlaceholder();
+        }
+        openChatList();
+      } else { alert(r.data?.error || t("js.deleteFailed")); }
+    }
+    async function deleteEntireChat() {
+      if (!currentRoomId) return;
+      await deleteRoomFromList(currentRoomId);
+    }
+
+    let searchDebounce = null;
+    async function startChatWith(otherKey) {
+      const u = getUser();
+      if (!u || (u.platform_user_id !== 0 && !u.platform_user_id)) { alert(t("js.sessionExpired")); return; }
+      let r;
+      try {
+        r = await api("/chat/room", { platform: u.platform, platform_user_id: u.platform_user_id, other_key: otherKey });
+      } catch (e) {
+        alert(t("js.chatNetwork") + (e.message || ""));
+        return;
+      }
+      if (!r.ok) {
+        let msg = r.data?.error || r.data?.raw || ("status " + (r.status || "?"));
+        if (r.status === 404) msg = t("js.chatNoApi") + getApiUrl() + "\n\nRun the backend (e.g. port 3000). Log out and set API URL on sign-in if needed.";
+        alert(t("js.chatCreateFail") + msg);
+        return;
+      }
+      document.getElementById("chatSearch").value = "";
+      document.getElementById("chatSearchResults").classList.add("hidden");
+      document.getElementById("chatSearchResults").innerHTML = "";
+      openThread(r.data.room_id, otherKey);
+    }
+    document.getElementById("chatSearch").oninput = function () {
+      const q = this.value.trim();
+      const resultsEl = document.getElementById("chatSearchResults");
+      clearTimeout(searchDebounce);
+      if (!q) { resultsEl.classList.add("hidden"); resultsEl.innerHTML = ""; return; }
+      searchDebounce = setTimeout(async function () {
+        const u = getUser();
+        if (!u) { resultsEl.classList.add("hidden"); return; }
+        const r = await api("/chat/search?q=" + encodeURIComponent(q) + "&platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+        if (!r.ok || !r.data.users || !r.data.users.length) {
+          resultsEl.innerHTML = "<div class=\"search-item\" style=\"cursor:default;color:#8b949e\">" + escapeHtml(t("chat.searchNoResults")) + "</div>";
+          resultsEl.classList.remove("hidden");
+          return;
+        }
+        resultsEl.innerHTML = r.data.users.map(function (user) {
+          const label = user.username ? ("@" + user.username.replace(/^@/, "")) : user.platform_key;
+          return "<div class=\"search-item\" data-key=\"" + user.platform_key.replace(/"/g, "&quot;") + "\"><span>" + label + "</span><span class=\"key\">" + user.platform_key + "</span></div>";
+        }).join("");
+        resultsEl.classList.remove("hidden");
+        resultsEl.querySelectorAll(".search-item[data-key]").forEach(function (el) {
+          el.onclick = function () { startChatWith(el.getAttribute("data-key")); };
+        });
+      }, 280);
+    };
+
+    document.getElementById("btnChatDirect").onclick = function () {
+      let raw = document.getElementById("chatDirectId").value.trim();
+      if (!raw) { alert(t("js.peerId")); return; }
+      if (/^\d+$/.test(raw)) raw = "telegram:" + raw;
+      else if (raw.indexOf(":") === -1) raw = "telegram:" + raw;
+      startChatWith(raw);
+      document.getElementById("chatDirectId").value = "";
+    };
+    function doSendChat() {
+      const text = document.getElementById("chatInput").value.trim();
+      const errP = document.getElementById("chatSendError");
+      if (!text || !currentRoomId) return;
+      if (errP) { errP.classList.add("hidden"); errP.textContent = ""; }
+      const u = getUser();
+      api("/chat/rooms/" + encodeURIComponent(currentRoomId) + "/messages", { platform: u.platform, platform_user_id: u.platform_user_id, text: text }).then(function (r) {
+        if (r.ok) {
+          document.getElementById("chatInput").value = "";
+          if (errP) errP.classList.add("hidden");
+          loadChatMessages();
+        } else {
+          if (errP) {
+            errP.textContent = (r.data && r.data.error) ? String(r.data.error) : t("chat.sendFail");
+            errP.classList.remove("hidden");
+          }
+        }
+      });
+    }
+    document.getElementById("btnChatSend").onclick = doSendChat;
+    document.getElementById("chatInput").onkeydown = function (e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSendChat(); }
+    };
+
+    var autoSel = document.getElementById("chatAutoDelete");
+    if (autoSel) autoSel.onchange = async function () {
+      if (!currentRoomId) return;
+      const u = getUser();
+      if (!u) return;
+      const sec = Number(autoSel.value || "0");
+      currentAutoDeleteSec = sec;
+      var hint = document.getElementById("autoDeleteHint");
+      if (hint) hint.style.display = sec > 0 ? "block" : "none";
+      const r = await api("/chat/rooms/" + encodeURIComponent(currentRoomId) + "/auto_delete", {
+        platform: u.platform,
+        platform_user_id: u.platform_user_id,
+        seconds: sec,
+      });
+      if (!r.ok) alert(r.data?.error || t("js.autoDeleteFail"));
+      else loadChatMessages();
+    };
+    var btnDeleteChat = document.getElementById("btnDeleteChat");
+    if (btnDeleteChat) btnDeleteChat.onclick = deleteEntireChat;
+    var btnSendFromChat = document.getElementById("btnSendFromChat");
+    if (btnSendFromChat) btnSendFromChat.onclick = function () {
+      if (!currentOtherKey) return;
+      sendTargetPlatformKey = currentOtherKey;
+      var to = currentOtherKey.replace(/^telegram:/, "").replace(/^snvr_messenger:/, "");
+      if (/^\d+$/.test(to)) to = to;
+      else if (currentOtherKey.includes(":")) to = "@" + (currentOtherKey.split(":")[1] || to);
+      document.getElementById("sendTo").value = to;
+      goToView("send");
+    };
+
+    document.getElementById("btnLogout").onclick = function () {
+      clearChatPoll();
+      currentRoomId = null;
+      currentOtherKey = null;
+      clearUser();
+      clearCreds();
+      showScreen(true);
+    };
+
+    var btnClearHistory = document.getElementById("btnClearHistory");
+    if (btnClearHistory) btnClearHistory.onclick = async function () {
+      const u = getUser();
+      if (!u) return;
+      if (!confirm(t("js.clearHistoryConfirm"))) return;
+      const r = await api("/wallet/history/clear", { platform: u.platform, platform_user_id: u.platform_user_id });
+      if (!r.ok) alert(r.data?.error || t("js.clearHistoryFail"));
+      else loadHistory();
+    };
+
+    async function loadViewingKey() {
+      const u = getUser();
+      if (!u) return;
+      const wrap = document.getElementById("viewingKeyWrap");
+      const input = document.getElementById("viewingKeyInput");
+      const none = document.getElementById("viewingKeyNone");
+      const btn = document.getElementById("btnToggleViewingKey");
+      if (!wrap || !input) return;
+      let creds = getCreds();
+      if (!(creds && creds.permit)) {
+        // On refresh, recover creds from server link first to prevent false "disconnected" state.
+        try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
+        creds = getCreds();
+      }
+      if (creds && creds.permit) {
+        wrap.classList.remove("hidden");
+        none.classList.add("hidden");
+        const leftMs = Math.max(0, Number(creds.permit?.expires_at || 0) - Date.now());
+        const min = Math.ceil(leftMs / 60000);
+        input.value = "(permit session active, expires in ~" + min + " min)";
+        input.type = "text";
+        if (btn) btn.textContent = "Show";
+        return;
+      }
+      wrap.classList.add("hidden");
+      none.classList.remove("hidden");
+    }
+    function refreshWalletLinkStatusUi() {
+      const creds = getCreds();
+      const addrInput = document.getElementById("mySecretAddressInput");
+      const statusEl = document.getElementById("walletLinkStatus");
+      const badgePermit = document.getElementById("badgePermit");
+      const badgeViewingKey = document.getElementById("badgeViewingKey");
+      if (addrInput) addrInput.value = creds?.secret_address || "";
+      if (badgePermit) badgePermit.style.display = creds?.permit ? "inline-block" : "none";
+      if (badgeViewingKey) badgeViewingKey.style.display = "none";
+      if (statusEl) {
+        statusEl.textContent = hasWalletAuthCreds(creds)
+          ? "Wallet: linked (" + maskSecretAddress(creds.secret_address) + ")"
+          : "Wallet: not linked";
+        statusEl.style.color = hasWalletAuthCreds(creds) ? "#7ee787" : "";
+      }
+    }
+    async function loadBotBalanceSync() {
+      const u = getUser();
+      const toggle = document.getElementById("botBalanceSyncToggle");
+      const status = document.getElementById("botBalanceSyncStatus");
+      if (!u || !toggle || !status) return;
+      status.textContent = "Loading...";
+      const r = await api("/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+      if (!r.ok) {
+        status.textContent = r.data?.error || "Could not load status";
+        status.className = "error";
+        return;
+      }
+      toggle.checked = !!(r.data.enabled || r.data.has_secret_link);
+      try {
+        const c = getCreds() || {};
+        const addr = String(r.data?.secret_address || c.secret_address || "").trim();
+        const permit = r.data?.permit || c.permit || null;
+        if (addr && permit) setCreds(addr, "", permit);
+        // If user already has permit session, turn bot sync ON automatically (no manual checkbox tap).
+        if (addr && permit && !r.data?.enabled) {
+          const autoOnR = await api("/wallet/bot-balance-sync", {
+            platform: u.platform,
+            platform_user_id: u.platform_user_id,
+            enabled: true,
+            secret_address: addr,
+            viewing_key: "",
+            permit: permit,
+          });
+          if (autoOnR.ok) toggle.checked = true;
+        }
+      } catch (_e) { /* ignore */ }
+      status.className = "search-hint";
+      status.textContent = (r.data.enabled || r.data.has_secret_link)
+        ? "Current: ON (bot /balance uses on-chain)"
+        : "Current: OFF (bot /balance uses app balance)";
+    }
+    /** After Keplr/permit success: enable Telegram bot on-chain sync without asking the user to tick the box. */
+    async function enableBotBalanceSyncOnServer(secretAddress, viewingKey, permit) {
+      const u = getUser();
+      const toggle = document.getElementById("botBalanceSyncToggle");
+      const status = document.getElementById("botBalanceSyncStatus");
+      if (!u || !secretAddress) return;
+      const c = getCreds();
+      const p = permit !== undefined ? permit : (c?.permit || null);
+      const r = await api("/wallet/bot-balance-sync", {
+        platform: u.platform,
+        platform_user_id: u.platform_user_id,
+        enabled: true,
+        secret_address: secretAddress,
+        viewing_key: "",
+        permit: p || null,
+      });
+      if (toggle) toggle.checked = !!r.ok;
+      if (!status) return;
+      if (r.ok) {
+        status.textContent = "Current: ON — Telegram can use on-chain balance (wallet connect auto-enabled this).";
+        status.className = "success";
+      } else {
+        status.textContent = r.data?.error || "Could not enable bot sync";
+        status.className = "error";
+      }
+    }
+    document.getElementById("btnToggleViewingKey").onclick = function () {
+      const input = document.getElementById("viewingKeyInput");
+      if (input.type === "password") { input.type = "text"; this.textContent = "Hide"; }
+      else { input.type = "password"; this.textContent = "Show"; }
+    };
+    document.getElementById("btnCopyViewingKey").onclick = function () {
+      const input = document.getElementById("viewingKeyInput");
+      copyToClipboardSnvr(input ? input.value : "", "Viewing key copied.");
+    };
+    var btnClearViewingKey = document.getElementById("btnClearViewingKey");
+    if (btnClearViewingKey) btnClearViewingKey.onclick = async function () {
+      const statusEl = document.getElementById("manualWalletResult");
+      const u = getUser();
+      const c = getCreds();
+      if (!statusEl) return;
+      statusEl.classList.remove("hidden");
+      if (!u || !c?.secret_address) {
+        statusEl.textContent = "No linked wallet found.";
+        statusEl.className = "error";
+        return;
+      }
+      setCreds(c.secret_address, "", c.permit || null);
+      const linkR = await syncServerWalletLink(c.secret_address, "", c.permit || null);
+      if (!linkR.ok && !linkR.skipped) {
+        statusEl.textContent = "Local key cleared, but server update failed. Retry once.";
+        statusEl.className = "error";
+        return;
+      }
+      await loadViewingKey();
+      refreshWalletLinkStatusUi();
+      statusEl.textContent = "Viewing key cleared (local + server). Permit session kept.";
+      statusEl.className = "success";
+    };
+    var btnApplyViewingKeyNow = document.getElementById("btnApplyViewingKeyNow");
+    if (btnApplyViewingKeyNow) btnApplyViewingKeyNow.onclick = async function () {
+      const addrInput = document.getElementById("mySecretAddressInput");
+      const vkInput = document.getElementById("viewingKeyInput");
+      const statusEl = document.getElementById("manualWalletResult");
+      const addr = String(addrInput?.value || "").trim();
+      const vk = String(vkInput?.value || "").trim();
+      if (!statusEl) return;
+      statusEl.classList.remove("hidden");
+      if (!addr.startsWith("secret1")) {
+        statusEl.textContent = "Address not found. Connect Keplr first.";
+        statusEl.className = "error";
+        return;
+      }
+      if (!vk || vk.length < 8) {
+        statusEl.textContent = "Viewing key not found. Generate/approve viewing key in wallet first.";
+        statusEl.className = "error";
+        return;
+      }
+      setCreds(addr, vk);
+      const linkR = await syncServerWalletLink(addr, vk);
+      if (!linkR.ok && !linkR.skipped) {
+        statusEl.textContent = "Applied locally, but server link sync failed. Retry once.";
+        statusEl.className = "error";
+        return;
+      }
+      loadViewingKey();
+      refreshWalletLinkStatusUi();
+      await enableBotBalanceSyncOnServer(addr, vk);
+      statusEl.textContent = "Applied. Wallet linked with current address + viewing key.";
+      statusEl.className = "success";
+    };
+    document.getElementById("btnCopyMySecretAddress").onclick = function () {
+      const input = document.getElementById("mySecretAddressInput");
+      copyToClipboardSnvr(input ? input.value : "", "Wallet address copied.");
+    };
+    var btnOpenInKeplr = document.getElementById("btnOpenInKeplr");
+    if (btnOpenInKeplr) btnOpenInKeplr.onclick = function () {
+      var link = buildKeplrWebBrowserDeeplink();
+      var hint = document.getElementById("keplrOpenHint");
+      try { localStorage.setItem(KEPLR_PENDING_KEY, "1"); } catch (_e) { /* ignore */ }
+      setKeplrFlowStatus("opened_keplr_link");
+      if (hint) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#f7b955";
+        hint.textContent = "Keplr opening... After approving in Keplr, return here and tap 'I approved in Keplr' if auto-connect does not start.";
+      }
+      try {
+        window.location.href = link;
+      } catch (_e) {
+        /* ignore */
+      }
+      setTimeout(function () {
+        if (hint) {
+          hint.classList.remove("hidden");
+          hint.className = "search-hint";
+          hint.style.color = "#f7b955";
+          hint.textContent = "If Keplr did not open, use Telegram menu (⋮) -> Open in browser, then tap Open in Keplr again.";
+        }
+      }, 900);
+    };
+    var btnCopyKeplrDeeplink = document.getElementById("btnCopyKeplrDeeplink");
+    if (btnCopyKeplrDeeplink) btnCopyKeplrDeeplink.onclick = function () {
+      copyToClipboardSnvr(buildKeplrWebBrowserDeeplink(), "Keplr deeplink copied.");
+      var hint = document.getElementById("keplrOpenHint");
+      if (hint) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#f7b955";
+        hint.textContent = "Paste the deeplink in an external browser if Telegram in-app blocks opening Keplr.";
+      }
+    };
+    (function initKeplrOpenHint() {
+      var hint = document.getElementById("keplrOpenHint");
+      if (!hint) return;
+      if (isTelegramInAppBrowser()) {
+        hint.classList.remove("hidden");
+        hint.className = "search-hint";
+        hint.style.color = "#f7b955";
+        hint.textContent = "Telegram in-app browser may block opening Keplr. If blocked, open this page in external browser first.";
+      }
+    })();
+    var btnCheckKeplrApproval = document.getElementById("btnCheckKeplrApproval");
+    if (btnCheckKeplrApproval) btnCheckKeplrApproval.onclick = function () {
+      setKeplrFlowStatus("manual_check_clicked");
+      var btn = document.getElementById("btnKeplrConnect");
+      if (btn) btn.click();
+    };
+    let keplrReturnCheckBusy = false;
+    function triggerPendingKeplrCheck(reason) {
+      try {
+        if (keplrReturnCheckBusy) return;
+        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
+        if (!pending || !window.keplr) return;
+        keplrReturnCheckBusy = true;
+        setKeplrFlowStatus(String(reason || "pending_recheck"));
+        var btn = document.getElementById("btnKeplrConnect");
+        if (btn) btn.click();
+      } catch (_e) { /* ignore */ }
+      setTimeout(function () { keplrReturnCheckBusy = false; }, 1800);
+    }
+    (function autoConnectInKeplrBrowser() {
+      try {
+        var q = new URLSearchParams(location.search);
+        var fromQuery = q.get("keplr_autoconnect") === "1";
+        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
+        if (!fromQuery && !pending) return;
+        if (!window.keplr) return;
+        if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1" && !pending) return;
+        setKeplrFlowStatus("autoconnect_attempt");
+        sessionStorage.setItem("snvr_keplr_autoconnect_done", "1");
+        setTimeout(function () {
+          showView("settings");
+          var btn = document.getElementById("btnKeplrConnect");
+          if (btn) btn.click();
+        }, 450);
+      } catch (_e) { /* ignore */ }
+    })();
+    (function restoreKeplrFlowStatus() {
+      try {
+        var s = localStorage.getItem(KEPLR_FLOW_STATUS_KEY) || "idle";
+        setKeplrFlowStatus(s);
+      } catch (_e) {
+        setKeplrFlowStatus("idle");
+      }
+    })();
+    window.addEventListener("pageshow", function () {
+      triggerPendingKeplrCheck("pageshow_recheck");
+    });
+    window.addEventListener("focus", function () {
+      triggerPendingKeplrCheck("focus_recheck");
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") triggerPendingKeplrCheck("visible_recheck");
+    });
+    var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
+    if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
+      var addrEl = document.getElementById("manualSecretAddress");
+      var topAddrEl = document.getElementById("mySecretAddressInput");
+      var keyEl = document.getElementById("manualViewingKey");
+      var resultEl = document.getElementById("manualWalletResult");
+      var addr = String(addrEl ? addrEl.value : "").trim() || String(topAddrEl ? topAddrEl.value : "").trim();
+      var vkey = String(keyEl ? keyEl.value : "").trim();
+      if (!resultEl) return;
+      resultEl.classList.remove("hidden");
+      if (!addr.startsWith("secret1")) {
+        resultEl.textContent = "Please enter a valid secret1... address.";
+        resultEl.className = "error";
+        return;
+      }
+      if (!vkey || vkey.length < 8) {
+        resultEl.textContent = "Viewing key is required for strict mode. Paste a valid viewing key.";
+        resultEl.className = "error";
+        return;
+      }
+      setCreds(addr, vkey);
+      const linkR = await syncServerWalletLink(addr, vkey);
+      if (!linkR.ok && !linkR.skipped) {
+        resultEl.textContent = "Saved locally, but server link sync failed. Retry once.";
+        resultEl.className = "error";
+        return;
+      }
+      loadViewingKey();
+      refreshWalletLinkStatusUi();
+      await enableBotBalanceSyncOnServer(addr, vkey);
+      resultEl.textContent = "Saved locally. Wallet linked with address + viewing key.";
+      resultEl.className = "success";
+      if (addrEl) addrEl.value = "";
+      if (keyEl) keyEl.value = "";
+    };
+    var btnPasteManualAddress = document.getElementById("btnPasteManualAddress");
+    if (btnPasteManualAddress) btnPasteManualAddress.onclick = function () {
+      pasteIntoInput(document.getElementById("manualSecretAddress"));
+    };
+    var btnEnterManualAddress = document.getElementById("btnEnterManualAddress");
+    if (btnEnterManualAddress) btnEnterManualAddress.onclick = function () {
+      var v = prompt("Enter secret address (secret1...)");
+      if (v != null) {
+        var input = document.getElementById("manualSecretAddress");
+        if (input) input.value = String(v).trim();
+      }
+    };
+    var btnPasteManualViewingKey = document.getElementById("btnPasteManualViewingKey");
+    if (btnPasteManualViewingKey) btnPasteManualViewingKey.onclick = function () {
+      pasteIntoInput(document.getElementById("manualViewingKey"));
+    };
+    var btnEnterManualViewingKey = document.getElementById("btnEnterManualViewingKey");
+    if (btnEnterManualViewingKey) btnEnterManualViewingKey.onclick = function () {
+      var v = prompt("Enter viewing key");
+      if (v != null) {
+        var input = document.getElementById("manualViewingKey");
+        if (input) input.value = String(v).trim();
+      }
+    };
+    (function syncTopAddressInput() {
+      var top = document.getElementById("mySecretAddressInput");
+      var manual = document.getElementById("manualSecretAddress");
+      if (!top || !manual) return;
+      top.addEventListener("input", function () {
+        var v = String(top.value || "").trim();
+        if (v.startsWith("secret1")) manual.value = v;
+      });
+    })();
+    (function enableInputPasteUX() {
+      ["manualSecretAddress", "manualViewingKey", "linkCode"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.setAttribute("autocomplete", "on");
+        el.setAttribute("autocapitalize", "off");
+        el.setAttribute("autocorrect", "off");
+        el.setAttribute("spellcheck", "false");
+        el.addEventListener("focus", function () {
+          try { this.style.webkitUserSelect = "text"; } catch (_e) { /* ignore */ }
+        });
+        el.addEventListener("contextmenu", function () {
+          /* allow native paste/select menu */
+        });
+      });
+    })();
+    document.getElementById("botBalanceSyncToggle").onchange = async function () {
+      const u = getUser();
+      const status = document.getElementById("botBalanceSyncStatus");
+      if (!u || !status) return;
+      const creds = getCreds();
+      if (this.checked && !(creds && creds.secret_address && creds.permit)) {
+        this.checked = false;
+        status.textContent = "Permit session is required for bot on-chain sync. Reconnect Keplr first.";
+        status.className = "error";
+        return;
+      }
+      status.textContent = "Saving...";
+      status.className = "search-hint";
+      const r = await api("/wallet/bot-balance-sync", {
+        platform: u.platform,
+        platform_user_id: u.platform_user_id,
+        enabled: !!this.checked,
+        secret_address: creds?.secret_address,
+        viewing_key: "",
+        permit: creds?.permit || null,
+      });
+      if (!r.ok) {
+        status.textContent = r.data?.error || "Save failed";
+        status.className = "error";
+        this.checked = !this.checked;
+        return;
+      }
+      status.textContent = this.checked
+        ? "Current: ON (bot /balance uses on-chain)"
+        : "Current: OFF (bot /balance uses app balance)";
+      status.className = "success";
+    };
+
+    var codeParam = new URLSearchParams(location.search).get("code");
+    if (codeParam && /^\d{6}$/.test(codeParam)) sessionStorage.setItem("snvr_send_code", codeParam);
+
+    function syncAppLayoutHeight() {
+      try {
+        var header = document.querySelector(".header-logo-wrap");
+        var headerH = header ? header.getBoundingClientRect().height : 0;
+        var viewportH = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+        var appH = Math.max(260, Math.floor(viewportH - headerH));
+        document.documentElement.style.setProperty("--app-height", appH + "px");
+      } catch (_e) { /* ignore */ }
+    }
+    function enforceMobileScrollLayout() {
+      try {
+        if (window.innerWidth > 768) return;
+        document.documentElement.style.height = "auto";
+        document.body.style.height = "auto";
+        document.body.style.overflowY = "auto";
+        document.body.style.overflowX = "hidden";
+        document.body.style.paddingBottom = "calc(96px + env(safe-area-inset-bottom))";
+        var app = document.querySelector(".app-wrap");
+        if (app) {
+          app.style.height = "auto";
+          app.style.overflow = "visible";
+          app.style.minHeight = "0";
+        }
+        var main = document.querySelector(".main-content");
+        if (main) {
+          main.style.overflowY = "visible";
+          main.style.overflowX = "hidden";
+          main.style.height = "auto";
+          main.style.minHeight = "calc(100dvh - 56px)";
+        }
+        var views = document.querySelectorAll(".view");
+        views.forEach(function (el) {
+          el.style.overflow = "visible";
+          el.style.maxHeight = "none";
+          el.style.height = "auto";
+        });
+        var cards = document.querySelectorAll("#viewSend .card, #viewSwap .card, #viewMix .card, #viewReceive .card, #viewSettings .card, .chat-list-pane .card, .chat-thread-pane .card");
+        cards.forEach(function (el) {
+          el.style.overflow = "visible";
+          el.style.maxHeight = "none";
+          el.style.height = "auto";
+        });
+        var txHistory = document.getElementById("txHistory");
+        if (txHistory) {
+          txHistory.style.maxHeight = "none";
+          txHistory.style.overflowY = "visible";
+        }
+      } catch (_e) { /* ignore */ }
+    }
+    syncAppLayoutHeight();
+    enforceMobileScrollLayout();
+    window.addEventListener("resize", syncAppLayoutHeight);
+    window.addEventListener("resize", enforceMobileScrollLayout);
+    window.addEventListener("orientationchange", function () { setTimeout(syncAppLayoutHeight, 120); });
+    window.addEventListener("orientationchange", function () { setTimeout(enforceMobileScrollLayout, 140); });
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      window.visualViewport.addEventListener("resize", syncAppLayoutHeight);
+      window.visualViewport.addEventListener("resize", enforceMobileScrollLayout);
+    }
+
+    async function autoDetectBackend() {
+      var input = document.getElementById("apiUrl");
+      if (!input || input.value.trim()) return;
+      var q = new URLSearchParams(location.search).get("api");
+      if (q) { input.value = q.replace(/\/$/, ""); return; }
+      var saved = localStorage.getItem(API_URL_KEY);
+      if (saved) { input.value = saved.replace(/\/$/, ""); return; }
+      input.value = DEFAULT_API_URL;
+      var candidates = [ DEFAULT_API_URL ];
+      if (location.hostname && location.hostname !== "localhost") {
+        candidates.push(location.protocol + "//" + location.hostname + ":3000");
+      }
+      for (var i = 0; i < candidates.length; i++) {
+        try {
+          var r = await fetch(candidates[i] + "/health");
+          var d = await r.json().catch(function () { return {}; });
+          if (r.ok && d.service === "snvr-backend") {
+            input.value = candidates[i];
+            var el = document.getElementById("connectionTestResult");
+            if (el) { el.classList.remove("hidden"); el.textContent = "✓ Backend auto-detected"; el.className = "success"; }
+            return;
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
+    refreshWalletLinkStatusUi();
+    applyI18n();
+    var langSelectEl = document.getElementById("langSelect");
+    if (langSelectEl) {
+      langSelectEl.onchange = function () {
+        localStorage.setItem(LANG_KEY, this.value);
+        applyI18n();
+        if (!currentRoomId) renderChatThreadPlaceholder();
+        else void loadChatMessages();
+        void openChatList();
+      };
+    }
+    captureDeepLinkForSession();
+    void (async function initAuthBoot() {
+      if (getUser()) {
+        showScreen(false);
+        return;
+      }
+      let signedIn = false;
+      try {
+        signedIn = await tryTelegramAutoSignIn();
+      } catch (_e) {
+        signedIn = false;
+      }
+      if (signedIn) {
+        showScreen(false);
+      } else {
+        showScreen(true);
+        autoDetectBackend();
+      }
+    })();
+    setTimeout(enforceMobileScrollLayout, 30);
+    setTimeout(enforceMobileScrollLayout, 300);
+
+    (function initChatMobileScroll() {
+      var chatInput = document.getElementById("chatInput");
+      if (!chatInput) return;
+      chatInput.addEventListener("focus", function () {
+        if (!window.visualViewport) return;
+        window.setTimeout(function () {
+          chatInput.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }, 300);
+      });
+    })();
+    // Disable stale PWA cache during active development to avoid loading old scripts.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then(function (regs) { return Promise.all(regs.map(function (r) { return r.unregister(); })); })
+        .then(function () { return caches.keys(); })
+        .then(function (keys) { return Promise.all(keys.map(function (k) { return caches.delete(k); })); })
+        .catch(function () {});
+    }
+    });
+  </script>
+</body>
+</html>
