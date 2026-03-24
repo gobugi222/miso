@@ -174,6 +174,7 @@ function ensureUser(platform, platformUserId, username) {
       avatar: null,
       secret_address: null,
       viewing_key: null,
+      permit: null,
       bot_balance_sync: false,
       locale: "en",
     });
@@ -268,6 +269,19 @@ app.get("/wallet/balance", async (req, res) => {
       return res.json({ ok: true, balance: human, source: "chain" });
     }
   }
+  if (u.secret_address && u.permit) {
+    try {
+      const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
+      if (chainBal != null) {
+        const human = Number(chainBal) / 1e9;
+        return res.json({ ok: true, balance: human, source: "chain" });
+      }
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") {
+        return res.status(400).json({ ok: false, error: "permit_invalid", message: "저장된 permit이 만료되었습니다. 메신저 설정에서 Keplr를 다시 연결해 주세요." });
+      }
+    }
+  }
   return res.json({ ok: true, balance: u.balance, source: "memory" });
 });
 
@@ -310,8 +324,18 @@ app.post("/wallet/balance", async (req, res) => {
       throw e;
     }
   }
-  // 3) 저장된 기존 링크(viewing key) fallback
+  // 3) 저장된 기존 링크(permit 우선 → viewing key) fallback
   const u = ensureUser(platform, platform_user_id);
+  if (u.secret_address && u.permit) {
+    try {
+      const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
+      if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "stored_permit" });
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") {
+        return res.status(400).json({ ok: false, error: "permit_invalid", message: "저장된 permit이 만료되었습니다. 메신저 설정에서 Keplr를 다시 연결해 주세요." });
+      }
+    }
+  }
   if (u.secret_address && u.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
     if (chainBal != null) return res.json({ ok: true, balance: Number(chainBal) / 1e9, source: "chain", auth: "stored_viewing_key" });
@@ -324,6 +348,15 @@ async function getEffectiveBalance(u) {
   if (u?.secret_address && u?.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
     if (chainBal != null) return Number(chainBal) / 1e9;
+    throw new Error("CHAIN_BALANCE_UNAVAILABLE");
+  }
+  if (u?.secret_address && u?.permit) {
+    try {
+      const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
+      if (chainBal != null) return Number(chainBal) / 1e9;
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") throw e;
+    }
     throw new Error("CHAIN_BALANCE_UNAVAILABLE");
   }
   return u?.balance ?? 0;
@@ -373,6 +406,14 @@ async function isWalletLinked(u, secret_address, viewing_key, permit) {
       return false;
     }
   }
+  if (u?.secret_address && u?.permit) {
+    try {
+      const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
+      return chainBal != null;
+    } catch (_e) {
+      return false;
+    }
+  }
   return !!(u?.secret_address && u?.viewing_key);
 }
 
@@ -409,7 +450,7 @@ app.post("/wallet/send", async (req, res) => {
   if (!toKey || toKey === fromKey) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "specify_recipient") });
   const [toPlatform, toId] = toKey.split(":");
   const toU = ensureUser(toPlatform, toId);
-  if (!toWalletLinked && !(toU.secret_address && toU.viewing_key)) {
+  if (!toWalletLinked && !(toU.secret_address && (toU.viewing_key || toU.permit))) {
     return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "recipient_wallet_required") });
   }
   let effective;
@@ -494,13 +535,19 @@ app.post("/wallet/send", async (req, res) => {
 });
 
 app.post("/wallet/link-secret", (req, res) => {
-  const { platform = "telegram", platform_user_id, secret_address, viewing_key, locale } = req.body || {};
-  if (!platform_user_id || !secret_address || !viewing_key) {
-    return res.status(400).json({ ok: false, error: "platform_user_id, secret_address, viewing_key required" });
+  const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit, locale } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
+  if (!platform_user_id || !secret_address) {
+    return res.status(400).json({ ok: false, error: "platform_user_id, secret_address required" });
+  }
+  const vk = String(viewing_key || "").trim();
+  if (!vk && !permit) {
+    return res.status(400).json({ ok: false, error: "viewing_key or permit required" });
   }
   const u = ensureUser(platform, platform_user_id);
   u.secret_address = String(secret_address).trim();
-  u.viewing_key = String(viewing_key).trim();
+  u.viewing_key = vk || null;
+  u.permit = permit || null;
   u.bot_balance_sync = true;
   if (locale && ["en", "ko", "ja"].includes(String(locale).toLowerCase())) u.locale = String(locale).toLowerCase();
   saveDb();
@@ -518,13 +565,14 @@ app.get("/wallet/bot-balance-sync", (req, res) => {
   return res.json({
     ok: true,
     enabled: !!u.bot_balance_sync,
-    has_secret_link: !!(u.secret_address && u.viewing_key),
+    has_secret_link: !!(u.secret_address && (u.viewing_key || u.permit)),
     secret_address: u.secret_address || null,
+    permit: u.permit || null,
   });
 });
 
 app.post("/wallet/bot-balance-sync", (req, res) => {
-  const { platform = "telegram", platform_user_id, enabled, secret_address, viewing_key, locale } = req.body || {};
+  const { platform = "telegram", platform_user_id, enabled, secret_address, viewing_key, permit: rawPermit, locale } = req.body || {};
   if (!platform_user_id) {
     return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   }
@@ -535,15 +583,19 @@ app.post("/wallet/bot-balance-sync", (req, res) => {
     u.bot_balance_sync = false;
     u.secret_address = null;
     u.viewing_key = null;
+    u.permit = null;
     saveDb();
     return res.json({ ok: true, enabled: false, message: "봇 잔액 동기화 해제됨" });
   }
 
-  if (!secret_address || !viewing_key) {
-    return res.status(400).json({ ok: false, error: "secret_address, viewing_key required when enabling sync" });
+  const permit = parsePermitInput(rawPermit);
+  const vk = String(viewing_key || "").trim();
+  if (!secret_address || (!vk && !permit)) {
+    return res.status(400).json({ ok: false, error: "secret_address and (viewing_key or permit) required when enabling sync" });
   }
   u.secret_address = String(secret_address).trim();
-  u.viewing_key = String(viewing_key).trim();
+  u.viewing_key = vk || null;
+  u.permit = permit || null;
   u.bot_balance_sync = true;
   saveDb();
   return res.json({ ok: true, enabled: true, message: "봇 잔액 동기화 활성화됨" });
