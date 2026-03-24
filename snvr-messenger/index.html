@@ -1169,14 +1169,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const u = getUser();
       if (!u || !secretAddress) return { ok: false, skipped: true };
       const creds = getCreds();
-      const vk = viewingKey !== undefined && viewingKey !== null ? String(viewingKey).trim() : String(creds?.viewing_key || "").trim();
       const p = permit !== undefined ? permit : creds?.permit || null;
-      if (!vk && !p) return { ok: false, skipped: true };
+      if (!p) return { ok: false, skipped: true };
       return api("/wallet/link-secret", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         secret_address: secretAddress,
-        viewing_key: vk || "",
+        viewing_key: "",
         permit: p || null,
       });
     }
@@ -1185,17 +1184,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!u) return;
       const prev = getCreds() || {};
       const q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
-      const [syncR, vkR] = await Promise.all([api("/wallet/bot-balance-sync?" + q), api("/wallet/viewing-key?" + q)]);
+      const syncR = await api("/wallet/bot-balance-sync?" + q);
       let addr = syncR.ok ? String(syncR.data?.secret_address || "").trim() : "";
       if (!addr) addr = String(prev.secret_address || "").trim();
       if (!addr) return;
       const permitFromServer = syncR.ok ? (syncR.data?.permit || null) : null;
-      const vkServer = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
-      const vk = vkServer || String(prev.viewing_key || "").trim();
-      // Server may not store permit yet; never wipe locally signed permit when merging.
       const permit = permitFromServer || prev.permit || null;
-      if (vk || permit) {
-        setCreds(addr, vk, permit);
+      if (permit) {
+        setCreds(addr, "", permit);
       }
     }
     function myKey() {
@@ -2083,15 +2079,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const accts = await withTimeout(signer.getAccounts(), 12000, "KEPLR_ACCOUNT_TIMEOUT_AUTO");
         const secretAddress = String(accts?.[0]?.address || "").trim();
         if (!secretAddress) return false;
+        const linkedAddr = String(c.secret_address || "").trim();
+        if (linkedAddr && linkedAddr !== secretAddress) return false;
         const permit = await withTimeout(
           createBalancePermit(window.keplr, chainId, secretAddress, snvrAddr),
           15000,
           "PERMIT_TIMEOUT_AUTO"
         );
         if (!permit) return false;
-        setCreds(secretAddress, c.viewing_key || "", permit);
-        await syncServerWalletLink(secretAddress, c.viewing_key || "", permit);
-        await enableBotBalanceSyncOnServer(secretAddress, c.viewing_key || "", permit);
+        setCreds(secretAddress, "", permit);
+        await syncServerWalletLink(secretAddress, "", permit);
+        await enableBotBalanceSyncOnServer(secretAddress, "", permit);
         return true;
       } catch (_e) {
         return false;
@@ -2573,58 +2571,23 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const btn = document.getElementById("btnToggleViewingKey");
       if (!wrap || !input) return;
       let creds = getCreds();
-      if (!(creds && (creds.viewing_key || creds.permit))) {
+      if (!(creds && creds.permit)) {
         // On refresh, recover creds from server link first to prevent false "disconnected" state.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
         creds = getCreds();
       }
-      if (creds && creds.viewing_key) {
+      if (creds && creds.permit) {
         wrap.classList.remove("hidden");
         none.classList.add("hidden");
-        input.value = creds.viewing_key;
-        input.type = "password";
-        if (btn) btn.textContent = "Show";
-        return;
-      }
-      if (creds && creds.permit && !creds.viewing_key) {
-        wrap.classList.remove("hidden");
-        none.classList.add("hidden");
-        input.value = "(permit — balance queries do not use a stored viewing key)";
+        const leftMs = Math.max(0, Number(creds.permit?.expires_at || 0) - Date.now());
+        const min = Math.ceil(leftMs / 60000);
+        input.value = "(permit session active, expires in ~" + min + " min)";
         input.type = "text";
         if (btn) btn.textContent = "Show";
         return;
       }
-      const r = await api("/wallet/viewing-key?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
-      if (r.ok && r.data.viewing_key) {
-        wrap.classList.remove("hidden");
-        none.classList.add("hidden");
-        input.value = r.data.viewing_key;
-        input.type = "password";
-        if (btn) btn.textContent = "Show";
-        // Persist server-side viewing key into local creds so refresh does not "lose" key state.
-        const current = getCreds() || {};
-        let addr = String(current.secret_address || "").trim();
-        if (!addr) {
-          const addrInput = document.getElementById("mySecretAddressInput");
-          addr = String(addrInput?.value || "").trim();
-        }
-        if (!addr) {
-          const syncR = await api("/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
-          if (syncR.ok) addr = String(syncR.data?.secret_address || "").trim();
-        }
-        if (addr) {
-          setCreds(addr, String(r.data.viewing_key || "").trim(), current.permit || null);
-        }
-      } else if (creds && creds.permit) {
-        wrap.classList.remove("hidden");
-        none.classList.add("hidden");
-        input.value = "(permit — no viewing key on server for this account)";
-        input.type = "text";
-        if (btn) btn.textContent = "Show";
-      } else {
-        wrap.classList.add("hidden");
-        none.classList.remove("hidden");
-      }
+      wrap.classList.add("hidden");
+      none.classList.remove("hidden");
     }
     function refreshWalletLinkStatusUi() {
       const creds = getCreds();
@@ -2634,7 +2597,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const badgeViewingKey = document.getElementById("badgeViewingKey");
       if (addrInput) addrInput.value = creds?.secret_address || "";
       if (badgePermit) badgePermit.style.display = creds?.permit ? "inline-block" : "none";
-      if (badgeViewingKey) badgeViewingKey.style.display = creds?.viewing_key ? "inline-block" : "none";
+      if (badgeViewingKey) badgeViewingKey.style.display = "none";
       if (statusEl) {
         statusEl.textContent = hasWalletAuthCreds(creds)
           ? "Wallet: linked (" + maskSecretAddress(creds.secret_address) + ")"
@@ -2659,8 +2622,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const c = getCreds() || {};
         const addr = String(r.data?.secret_address || c.secret_address || "").trim();
         const permit = r.data?.permit || c.permit || null;
-        const vk = String(c.viewing_key || "").trim();
-        if (addr && (vk || permit)) setCreds(addr, vk, permit);
+        if (addr && permit) setCreds(addr, "", permit);
       } catch (_e) { /* ignore */ }
       status.className = "search-hint";
       status.textContent = (r.data.enabled || r.data.has_secret_link)
@@ -2680,7 +2642,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         platform_user_id: u.platform_user_id,
         enabled: true,
         secret_address: secretAddress,
-        viewing_key: viewingKey || c?.viewing_key || "",
+        viewing_key: "",
         permit: p || null,
       });
       if (toggle) toggle.checked = !!r.ok;
@@ -2915,9 +2877,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const status = document.getElementById("botBalanceSyncStatus");
       if (!u || !status) return;
       const creds = getCreds();
-      if (this.checked && !(creds && creds.secret_address && (creds.viewing_key || creds.permit))) {
+      if (this.checked && !(creds && creds.secret_address && creds.permit)) {
         this.checked = false;
-        status.textContent = "Viewing key or permit is required for bot on-chain sync. Reconnect Keplr first.";
+        status.textContent = "Permit session is required for bot on-chain sync. Reconnect Keplr first.";
         status.className = "error";
         return;
       }
@@ -2928,7 +2890,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         platform_user_id: u.platform_user_id,
         enabled: !!this.checked,
         secret_address: creds?.secret_address,
-        viewing_key: creds?.viewing_key || "",
+        viewing_key: "",
         permit: creds?.permit || null,
       });
       if (!r.ok) {
