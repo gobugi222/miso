@@ -704,6 +704,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const API_URL_KEY = "snvr_messenger_api_url";
     const CREDS_STORAGE_KEY = "snvr_messenger_creds";
     const PERMIT_BACKUP_KEY = "snvr_messenger_permit_backup";
+    const PERMIT_TTL_MS = 30 * 60 * 1000;
     const KEPLR_PENDING_KEY = "snvr_keplr_approval_pending";
     const KEPLR_FLOW_STATUS_KEY = "snvr_keplr_flow_status";
     const LAST_DASHBOARD_VIEW_KEY = "snvr_last_dashboard_view";
@@ -899,6 +900,21 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (ls) ls.value = lang;
     }
 
+    function isPermitSessionValid(permit) {
+      if (!permit || typeof permit !== "object") return false;
+      const exp = Number(permit.expires_at || 0);
+      return Number.isFinite(exp) && exp > Date.now();
+    }
+    function normalizePermitSession(permit) {
+      if (!permit || typeof permit !== "object") return null;
+      const base = Object.assign({}, permit);
+      const now = Date.now();
+      const issued = Number(base.issued_at || now);
+      const expires = Number(base.expires_at || (issued + PERMIT_TTL_MS));
+      base.issued_at = issued;
+      base.expires_at = expires;
+      return base;
+    }
     function getCreds() {
       try {
         const creds = JSON.parse(localStorage.getItem(CREDS_STORAGE_KEY));
@@ -909,6 +925,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             if (backupPermit && typeof backupPermit === "object") creds.permit = backupPermit;
           } catch (_e) { /* ignore */ }
         }
+        creds.permit = normalizePermitSession(creds.permit);
+        if (!isPermitSessionValid(creds.permit)) {
+          creds.permit = null;
+          try { localStorage.removeItem(PERMIT_BACKUP_KEY); } catch (_e) { /* ignore */ }
+        }
         return creds;
       } catch {
         return null;
@@ -916,16 +937,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
     function setCreds(secret_address, viewing_key, permit) {
       var prev = getCreds() || {};
-      var finalPermit = permit === undefined ? (prev.permit || null) : (permit || null);
+      var finalPermit = permit === undefined ? (prev.permit || null) : normalizePermitSession(permit || null);
       if (!finalPermit) {
         try {
           const backupPermit = JSON.parse(localStorage.getItem(PERMIT_BACKUP_KEY) || "null");
-          if (backupPermit && typeof backupPermit === "object") finalPermit = backupPermit;
+          if (backupPermit && typeof backupPermit === "object") finalPermit = normalizePermitSession(backupPermit);
         } catch (_e) { /* ignore */ }
       }
+      if (!isPermitSessionValid(finalPermit)) finalPermit = null;
       var next = {
         secret_address: secret_address || "",
-        viewing_key: viewing_key || "",
+        viewing_key: "",
         permit: finalPermit,
       };
       localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify(next));
@@ -938,14 +960,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       localStorage.removeItem(PERMIT_BACKUP_KEY);
     }
     function hasWalletAuthCreds(c) {
-      return !!(c && c.secret_address && (c.viewing_key || c.permit));
+      return !!(c && c.secret_address && isPermitSessionValid(c.permit));
     }
     function bodyWithCreds(body) {
       const c = getCreds();
       if (c && c.secret_address) {
         var out = Object.assign({}, body, { secret_address: c.secret_address });
-        if (c.viewing_key) out.viewing_key = c.viewing_key;
-        if (c.permit) out.permit = c.permit;
+        if (isPermitSessionValid(c.permit)) out.permit = c.permit;
         return out;
       }
       return body;
@@ -2036,9 +2057,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         preferNoSetFee: true,
         preferNoSetMemo: true,
       });
+      const now = Date.now();
       return {
         params: signDoc.msgs[0].value,
         signature: signed?.signature,
+        issued_at: now,
+        expires_at: now + PERMIT_TTL_MS,
       };
     }
     async function tryAutoRecoverPermitOnPc() {
