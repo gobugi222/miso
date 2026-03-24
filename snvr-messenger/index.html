@@ -949,7 +949,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!isPermitSessionValid(finalPermit)) finalPermit = null;
       var next = {
         secret_address: secret_address || "",
-        viewing_key: "",
+        viewing_key: viewing_key || prev.viewing_key || "",
         permit: finalPermit,
       };
       localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify(next));
@@ -962,12 +962,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       localStorage.removeItem(PERMIT_BACKUP_KEY);
     }
     function hasWalletAuthCreds(c) {
-      return !!(c && c.secret_address && isPermitSessionValid(c.permit));
+      return !!(c && c.secret_address && (isPermitSessionValid(c.permit) || !!c.viewing_key));
     }
     function bodyWithCreds(body) {
       const c = getCreds();
       if (c && c.secret_address) {
         var out = Object.assign({}, body, { secret_address: c.secret_address });
+        if (c.viewing_key) out.viewing_key = c.viewing_key;
         if (isPermitSessionValid(c.permit)) out.permit = c.permit;
         return out;
       }
