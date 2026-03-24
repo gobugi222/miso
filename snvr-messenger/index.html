@@ -1305,6 +1305,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           r = await fetchWalletBalanceServerOnly(u);
         }
       }
+      // If local permit/address combo returns zero, trust server-linked result when higher.
+      if (r.ok && Number(r.data?.balance || 0) === 0) {
+        const serverR = await fetchWalletBalanceServerOnly(u);
+        if (serverR.ok && Number(serverR.data?.balance || 0) > 0) {
+          try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
+          r = serverR;
+        }
+      }
       return r;
     }
     async function refreshBalance() {
@@ -2623,6 +2631,18 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const addr = String(r.data?.secret_address || c.secret_address || "").trim();
         const permit = r.data?.permit || c.permit || null;
         if (addr && permit) setCreds(addr, "", permit);
+        // If user already has permit session, turn bot sync ON automatically (no manual checkbox tap).
+        if (addr && permit && !r.data?.enabled) {
+          const autoOnR = await api("/wallet/bot-balance-sync", {
+            platform: u.platform,
+            platform_user_id: u.platform_user_id,
+            enabled: true,
+            secret_address: addr,
+            viewing_key: "",
+            permit: permit,
+          });
+          if (autoOnR.ok) toggle.checked = true;
+        }
       } catch (_e) { /* ignore */ }
       status.className = "search-hint";
       status.textContent = (r.data.enabled || r.data.has_secret_link)
