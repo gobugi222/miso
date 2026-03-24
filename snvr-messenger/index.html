@@ -678,6 +678,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const STORAGE_KEY = "snvr_messenger_user";
     const API_URL_KEY = "snvr_messenger_api_url";
     const CREDS_STORAGE_KEY = "snvr_messenger_creds";
+    const PERMIT_BACKUP_KEY = "snvr_messenger_permit_backup";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
 
@@ -871,18 +872,43 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
 
     function getCreds() {
-      try { return JSON.parse(localStorage.getItem(CREDS_STORAGE_KEY)); } catch { return null; }
+      try {
+        const creds = JSON.parse(localStorage.getItem(CREDS_STORAGE_KEY));
+        if (!creds || typeof creds !== "object") return null;
+        if (!creds.permit) {
+          try {
+            const backupPermit = JSON.parse(localStorage.getItem(PERMIT_BACKUP_KEY) || "null");
+            if (backupPermit && typeof backupPermit === "object") creds.permit = backupPermit;
+          } catch (_e) { /* ignore */ }
+        }
+        return creds;
+      } catch {
+        return null;
+      }
     }
     function setCreds(secret_address, viewing_key, permit) {
       var prev = getCreds() || {};
+      var finalPermit = permit === undefined ? (prev.permit || null) : (permit || null);
+      if (!finalPermit) {
+        try {
+          const backupPermit = JSON.parse(localStorage.getItem(PERMIT_BACKUP_KEY) || "null");
+          if (backupPermit && typeof backupPermit === "object") finalPermit = backupPermit;
+        } catch (_e) { /* ignore */ }
+      }
       var next = {
         secret_address: secret_address || "",
         viewing_key: viewing_key || "",
-        permit: permit === undefined ? (prev.permit || null) : (permit || null),
+        permit: finalPermit,
       };
       localStorage.setItem(CREDS_STORAGE_KEY, JSON.stringify(next));
+      if (next.permit) {
+        try { localStorage.setItem(PERMIT_BACKUP_KEY, JSON.stringify(next.permit)); } catch (_e) { /* ignore */ }
+      }
     }
-    function clearCreds() { localStorage.removeItem(CREDS_STORAGE_KEY); }
+    function clearCreds() {
+      localStorage.removeItem(CREDS_STORAGE_KEY);
+      localStorage.removeItem(PERMIT_BACKUP_KEY);
+    }
     function hasWalletAuthCreds(c) {
       return !!(c && c.secret_address && (c.viewing_key || c.permit));
     }
