@@ -674,6 +674,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         </div>
         <div class="card">
           <p class="search-hint">API: <span id="currentApiUrl"></span></p>
+          <p id="balanceDebug" class="search-hint" style="margin-top:6px;font-size:0.78rem;opacity:0.9;"></p>
           <p class="search-hint">Log out to change the API URL on the sign-in screen.</p>
         </div>
         <div class="card">
@@ -1322,6 +1323,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const r = await fetchWalletBalanceForUi(u);
       const b = document.getElementById("balance");
       if (b) b.textContent = r.ok ? r.data.balance : "?";
+      setBalanceDebug(r, u);
     }
     async function fetchWalletBalanceServerOnly(u) {
       const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
@@ -1338,6 +1340,19 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (c?.secret_address) setCreds(c.secret_address, "", null);
       else clearCreds();
       return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
+    }
+    function setBalanceDebug(resp, u) {
+      const el = document.getElementById("balanceDebug");
+      if (!el) return;
+      if (!u) { el.textContent = ""; return; }
+      const c = getCreds() || {};
+      const src = resp?.data?.source || "-";
+      const auth = resp?.data?.auth || "-";
+      const bal = (resp && resp.ok && resp.data && resp.data.balance != null) ? resp.data.balance : "?";
+      const addr = String(c.secret_address || "").trim();
+      const shortAddr = addr ? maskSecretAddress(addr) : "-";
+      el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr;
     }
 
     function profileAvatarUrl() {
@@ -1372,6 +1387,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         } else {
           if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
         }
+        setBalanceDebug(balanceR, u);
         if (profileR.ok && profileR.data) {
           if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
           if (avatarEl) {
@@ -1391,6 +1407,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (nameEl) nameEl.textContent = "SNVR Messenger";
         if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
         if (balanceEl) balanceEl.textContent = "";
+        setBalanceDebug({ ok: false, data: { source: "error", auth: "error", balance: "?" } }, u);
       });
     }
     async function loadProfileForm() {
