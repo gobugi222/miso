@@ -1182,6 +1182,22 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         permit: p || null,
       });
     }
+    async function ensureServerPermitSync() {
+      const u = getUser();
+      const c = getCreds();
+      if (!u || !c?.secret_address || !isPermitSessionValid(c?.permit)) return false;
+      const linkR = await syncServerWalletLink(c.secret_address, "", c.permit);
+      if (!linkR.ok && !linkR.skipped) return false;
+      const onR = await api("/wallet/bot-balance-sync", {
+        platform: u.platform,
+        platform_user_id: u.platform_user_id,
+        enabled: true,
+        secret_address: c.secret_address,
+        viewing_key: "",
+        permit: c.permit,
+      });
+      return !!onR.ok;
+    }
     async function hydrateCredsFromServer() {
       const u = getUser();
       if (!u) return;
@@ -1270,6 +1286,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           try {
             await hydrateCredsFromServer();
           } catch (_e) { /* ignore */ }
+          try { await ensureServerPermitSync(); } catch (_e) { /* ignore */ }
           if (!hasWalletAuthCreds(getCreds())) {
             try { await tryAutoRecoverPermitOnPc(); } catch (_e) { /* ignore */ }
           }
