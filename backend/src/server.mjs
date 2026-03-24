@@ -265,14 +265,16 @@ app.get("/wallet/balance", async (req, res) => {
   const u = ensureUser(platform, platform_user_id);
   const memBal = Number(u.balance || 0);
   if (locale && ["en", "ko", "ja"].includes(locale)) u.locale = locale;
+  res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+  const chainLinked = Boolean(u.secret_address && (u.viewing_key || u.permit));
   if (u.secret_address && u.viewing_key) {
     const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
     if (chainBal != null) {
       const human = Number(chainBal) / 1e9;
       if (human === 0 && memBal > 0) {
-        return res.json({ ok: true, balance: memBal, source: "memory_fallback" });
+        return res.json({ ok: true, chain_linked: chainLinked, balance: memBal, source: "memory_fallback" });
       }
-      return res.json({ ok: true, balance: human, source: "chain" });
+      return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain" });
     }
   }
   if (u.secret_address && u.permit) {
@@ -283,17 +285,18 @@ app.get("/wallet/balance", async (req, res) => {
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
         if (human === 0 && memBal > 0) {
-          return res.json({ ok: true, balance: memBal, source: "memory_fallback", permit_debug: permitProbe || undefined });
+          return res.json({ ok: true, chain_linked: chainLinked, balance: memBal, source: "memory_fallback", permit_debug: permitProbe || undefined });
         }
-        return res.json({ ok: true, balance: human, source: "chain", permit_debug: permitProbe || undefined });
+        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", permit_debug: permitProbe || undefined });
       }
     } catch (e) {
-      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, chain_linked: chainLinked, balance: memBal, source: "memory_fallback", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
       throw e;
     }
     if (debugPermit) {
       return res.json({
         ok: true,
+        chain_linked: chainLinked,
         balance: memBal,
         source: "memory",
         permit_debug: permitProbe ?? { ok: false, error_code: "PERMIT_CHAIN_NULL" },
@@ -311,6 +314,7 @@ app.get("/wallet/balance", async (req, res) => {
     });
   return res.json({
     ok: true,
+    chain_linked: chainLinked,
     balance: memBal,
     source: "memory",
     ...(memDbg ? { permit_debug: memDbg } : {}),
