@@ -289,9 +289,32 @@ app.get("/wallet/balance", async (req, res) => {
       }
     } catch (e) {
       if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
+      throw e;
+    }
+    if (debugPermit) {
+      return res.json({
+        ok: true,
+        balance: memBal,
+        source: "memory",
+        permit_debug: permitProbe ?? { ok: false, error_code: "PERMIT_CHAIN_NULL" },
+      });
     }
   }
-  return res.json({ ok: true, balance: memBal, source: "memory" });
+  const memDbg =
+    debugPermit &&
+    ({
+      ok: false,
+      reason: "no_stored_chain_credentials",
+      has_secret_address: Boolean(u.secret_address),
+      has_permit: Boolean(u.permit),
+      has_viewing_key: Boolean(u.viewing_key),
+    });
+  return res.json({
+    ok: true,
+    balance: memBal,
+    source: "memory",
+    ...(memDbg ? { permit_debug: memDbg } : {}),
+  });
 });
 
 function parsePermitInput(rawPermit) {
@@ -1124,4 +1147,3 @@ app.listen(PORT, () => {
   if (TELEGRAM_BOT_TOKEN) console.log("  [송금알림] 텔레그램 봇 토큰 로드됨 → 입금 시 텔레그램 알림 전송 가능");
   else console.warn("  [송금알림] TELEGRAM_BOT_TOKEN 없음 → backend/.env 또는 telegram-bot/.env의 BOT_TOKEN 필요");
 });
-
