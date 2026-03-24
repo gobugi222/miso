@@ -113,6 +113,12 @@ export async function getSnvrBalanceWithPermit(address, permit) {
   try {
     const client = getQueryClient();
     const target = String(address).trim();
+    const candidates = [];
+    const pickAmount = (v) => {
+      if (v == null) return;
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) candidates.push(Math.floor(n));
+    };
 
     // Path 1: secretjs SNIP-20 helper
     try {
@@ -122,7 +128,7 @@ export async function getSnvrBalanceWithPermit(address, permit) {
         auth: { permit },
       });
       const a1 = r1?.balance?.amount;
-      if (a1 != null) return a1;
+      pickAmount(a1);
     } catch (_e1) {
       /* fall through to raw contract queries */
     }
@@ -140,23 +146,31 @@ export async function getSnvrBalanceWithPermit(address, permit) {
         },
       });
       const a2 = r2?.balance?.amount;
-      if (a2 != null) return a2;
+      pickAmount(a2);
     } catch (_e2) {
       /* fall through to owner-style query */
     }
 
     // Path 3: raw with_permit + balance{} (owner implied by permit signer)
-    const r3 = await client.query.compute.queryContract({
-      contract_address: c.snvr_token,
-      code_hash: c.snvr_code_hash,
-      query: {
-        with_permit: {
-          permit,
-          query: { balance: {} },
+    try {
+      const r3 = await client.query.compute.queryContract({
+        contract_address: c.snvr_token,
+        code_hash: c.snvr_code_hash,
+        query: {
+          with_permit: {
+            permit,
+            query: { balance: {} },
+          },
         },
-      },
-    });
-    return r3?.balance?.amount ?? "0";
+      });
+      const a3 = r3?.balance?.amount;
+      pickAmount(a3);
+    } catch (_e3) {
+      /* handled below */
+    }
+
+    if (!candidates.length) return null;
+    return String(Math.max(...candidates));
   } catch (e) {
     console.warn("getSnvrBalanceWithPermit error:", e?.message);
     const msg = String(e?.message || "").toLowerCase();
