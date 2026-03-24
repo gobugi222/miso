@@ -705,6 +705,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const CREDS_STORAGE_KEY = "snvr_messenger_creds";
     const KEPLR_PENDING_KEY = "snvr_keplr_approval_pending";
     const KEPLR_FLOW_STATUS_KEY = "snvr_keplr_flow_status";
+    const LAST_DASHBOARD_VIEW_KEY = "snvr_last_dashboard_view";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
 
@@ -1009,8 +1010,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!v && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe)
         v = normalizeDeepLinkView(window.Telegram.WebApp.initDataUnsafe.start_param);
       if (!v) v = normalizeDeepLinkView(sessionStorage.getItem("snvr_deeplink_view"));
-      // Same-tab refresh: restore last tab (deeplink takes priority above).
-      if (!v) v = normalizeDeepLinkView(sessionStorage.getItem("snvr_last_dashboard_view"));
+      // Refresh / Telegram WebView: sessionStorage may reset — localStorage keeps last tab.
+      if (!v) {
+        try {
+          v = normalizeDeepLinkView(localStorage.getItem(LAST_DASHBOARD_VIEW_KEY));
+        } catch (_e) {
+          v = null;
+        }
+      }
       return v;
     }
     function captureDeepLinkForSession() {
@@ -1083,14 +1090,19 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
       return { ok: res.ok, status: res.status, data };
     }
-    async function syncServerWalletLink(secretAddress, viewingKey) {
+    async function syncServerWalletLink(secretAddress, viewingKey, permit) {
       const u = getUser();
-      if (!u || !secretAddress || !viewingKey) return { ok: false, skipped: true };
+      if (!u || !secretAddress) return { ok: false, skipped: true };
+      const creds = getCreds();
+      const vk = viewingKey !== undefined && viewingKey !== null ? String(viewingKey).trim() : String(creds?.viewing_key || "").trim();
+      const p = permit !== undefined ? permit : creds?.permit || null;
+      if (!vk && !p) return { ok: false, skipped: true };
       return api("/wallet/link-secret", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         secret_address: secretAddress,
-        viewing_key: viewingKey,
+        viewing_key: vk || "",
+        permit: p || null,
       });
     }
     async function hydrateCredsFromServer() {
@@ -1100,11 +1112,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!syncR.ok) return;
       const addr = String(syncR.data?.secret_address || "").trim();
       if (!addr) return;
+      const permitFromServer = syncR.data?.permit || null;
       const vkR = await api("/wallet/viewing-key?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
       const vk = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
-      if (!vk) return;
-      // Always align local creds with server-linked wallet on startup.
-      setCreds(addr, vk);
+      if (vk) {
+        setCreds(addr, vk, permitFromServer || null);
+      } else if (permitFromServer) {
+        setCreds(addr, "", permitFromServer);
+      }
     }
     function myKey() {
       const u = getUser();
@@ -1113,8 +1128,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
 
     function showView(name) {
       try {
-        if (["chat", "send", "swap", "mix", "receive", "settings"].indexOf(name) >= 0)
-          sessionStorage.setItem("snvr_last_dashboard_view", name);
+        if (["chat", "send", "swap", "mix", "receive", "settings"].indexOf(name) >= 0) {
+          try {
+            localStorage.setItem(LAST_DASHBOARD_VIEW_KEY, name);
+            sessionStorage.setItem("snvr_last_dashboard_view", name);
+          } catch (_e) { /* ignore */ }
+        }
       } catch (_e) { /* ignore */ }
       if (name !== "chat") clearChatPoll();
       ["chat", "send", "swap", "mix", "receive", "settings"].forEach(function (v) {
@@ -1179,6 +1198,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           refreshWalletLinkStatusUi();
           refreshBalance();
           refreshProfileSidebar();
+          if (hasWalletAuthCreds(getCreds())) setKeplrFlowStatus("connected");
           var dashView = getDesiredViewFromBootstrap() || "chat";
           sessionStorage.removeItem("snvr_deeplink_view");
           showView(dashView);
@@ -1199,7 +1219,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function refreshBalance() {
       const u = getUser();
       if (!u) return;
-      const r = await fetchWalletBalanceServerOnly(u);
+      const c = getCreds();
+      const r = hasWalletAuthCreds(c)
+        ? await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }))
+        : await fetchWalletBalanceServerOnly(u);
       const b = document.getElementById("balance");
       if (b) b.textContent = r.ok ? r.data.balance : "?";
     }
@@ -1241,7 +1264,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
       Promise.all([
         api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
-        fetchWalletBalanceServerOnly(u)
+        (function () {
+          const c = getCreds();
+          return hasWalletAuthCreds(c)
+            ? api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }))
+            : fetchWalletBalanceServerOnly(u);
+        })(),
       ]).then(function (results) {
         const profileR = results[0];
         const balanceR = results[1];
@@ -1660,8 +1688,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           return;
         } else {
           setCreds(secretAddress, viewingKey, permit);
-          if (viewingKey) {
-            const linkR = await syncServerWalletLink(secretAddress, viewingKey);
+          if (viewingKey || permit) {
+            const linkR = await syncServerWalletLink(secretAddress, viewingKey, permit);
             if (!linkR.ok && !linkR.skipped) {
               statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
               statusEl.className = "error";
@@ -1681,7 +1709,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        if (viewingKey) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
+        if (viewingKey || permit) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
         refreshProfileSidebar();
         tryAutoReturnAfterConnect();
       } catch (e) {
@@ -2493,12 +2521,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const toggle = document.getElementById("botBalanceSyncToggle");
       const status = document.getElementById("botBalanceSyncStatus");
       if (!u || !toggle || !toggle.checked || !status) return;
+      const c = getCreds();
       const r = await api("/wallet/bot-balance-sync", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         enabled: true,
         secret_address: secretAddress,
-        viewing_key: viewingKey,
+        viewing_key: viewingKey || "",
+        permit: c?.permit || null,
       });
       if (r.ok) {
         status.textContent = "Current: ON (bot /balance uses on-chain)";
@@ -2730,9 +2760,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const status = document.getElementById("botBalanceSyncStatus");
       if (!u || !status) return;
       const creds = getCreds();
-      if (this.checked && !(creds && creds.secret_address && creds.viewing_key)) {
+      if (this.checked && !(creds && creds.secret_address && (creds.viewing_key || creds.permit))) {
         this.checked = false;
-        status.textContent = "Viewing key is required for bot on-chain sync. Reconnect Keplr first.";
+        status.textContent = "Viewing key or permit is required for bot on-chain sync. Reconnect Keplr first.";
         status.className = "error";
         return;
       }
@@ -2743,7 +2773,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         platform_user_id: u.platform_user_id,
         enabled: !!this.checked,
         secret_address: creds?.secret_address,
-        viewing_key: creds?.viewing_key,
+        viewing_key: creds?.viewing_key || "",
+        permit: creds?.permit || null,
       });
       if (!r.ok) {
         status.textContent = r.data?.error || "Save failed";
