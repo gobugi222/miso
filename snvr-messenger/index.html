@@ -662,12 +662,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         <div class="card">
           <h3 class="view-title" style="font-size:1rem">🤖 Bot balance sync</h3>
           <p class="search-hint" style="margin-top:0;">
-            ON: store wallet address + viewing key on server so Telegram <code>/balance</code> can show on-chain balance<br />
+            <strong>Auto:</strong> When you finish <strong>Connect Keplr</strong> (permit / viewing key), this turns <strong>ON</strong> so Telegram <code>/balance</code>, send, swap can use your on-chain balance <strong>without opening the messenger again</strong>.<br />
             OFF: remove from server (Zero-Log); bot shows app balance only
           </p>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="botBalanceSyncToggle" style="width:auto;" />
-            Sync balance with bot
+            Sync balance with bot (auto on after wallet connect)
           </label>
           <p id="botBalanceSyncStatus" class="search-hint" style="margin-top:8px;">Loading...</p>
         </div>
@@ -1712,7 +1712,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        if (viewingKey || permit) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
+        if (viewingKey || permit) await enableBotBalanceSyncOnServer(secretAddress, viewingKey);
         refreshProfileSidebar();
         tryAutoReturnAfterConnect();
       } catch (e) {
@@ -1778,7 +1778,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         statusEl.className = "success";
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        await syncBotBalanceIfEnabled(secretAddress, newKey);
+        await enableBotBalanceSyncOnServer(secretAddress, newKey);
         refreshProfileSidebar();
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
@@ -2523,25 +2523,28 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         ? "Current: ON (bot /balance uses on-chain)"
         : "Current: OFF (bot /balance uses app balance)";
     }
-    async function syncBotBalanceIfEnabled(secretAddress, viewingKey) {
+    /** After Keplr/permit success: enable Telegram bot on-chain sync without asking the user to tick the box. */
+    async function enableBotBalanceSyncOnServer(secretAddress, viewingKey) {
       const u = getUser();
       const toggle = document.getElementById("botBalanceSyncToggle");
       const status = document.getElementById("botBalanceSyncStatus");
-      if (!u || !toggle || !toggle.checked || !status) return;
+      if (!u || !secretAddress) return;
       const c = getCreds();
       const r = await api("/wallet/bot-balance-sync", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         enabled: true,
         secret_address: secretAddress,
-        viewing_key: viewingKey || "",
+        viewing_key: viewingKey || c?.viewing_key || "",
         permit: c?.permit || null,
       });
+      if (toggle) toggle.checked = !!r.ok;
+      if (!status) return;
       if (r.ok) {
-        status.textContent = "Current: ON (bot /balance uses on-chain)";
+        status.textContent = "Current: ON — Telegram can use on-chain balance (wallet connect auto-enabled this).";
         status.className = "success";
       } else {
-        status.textContent = r.data?.error || "Sync failed";
+        status.textContent = r.data?.error || "Could not enable bot sync";
         status.className = "error";
       }
     }
@@ -2582,7 +2585,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       loadViewingKey();
       refreshWalletLinkStatusUi();
-      await syncBotBalanceIfEnabled(addr, vk);
+      await enableBotBalanceSyncOnServer(addr, vk);
       statusEl.textContent = "Applied. Wallet linked with current address + viewing key.";
       statusEl.className = "success";
     };
@@ -2707,7 +2710,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       loadViewingKey();
       refreshWalletLinkStatusUi();
-      await syncBotBalanceIfEnabled(addr, vkey);
+      await enableBotBalanceSyncOnServer(addr, vkey);
       resultEl.textContent = "Saved locally. Wallet linked with address + viewing key.";
       resultEl.className = "success";
       if (addrEl) addrEl.value = "";
