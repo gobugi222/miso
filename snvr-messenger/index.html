@@ -1250,6 +1250,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           try {
             await hydrateCredsFromServer();
           } catch (_e) { /* ignore */ }
+          if (!hasWalletAuthCreds(getCreds())) {
+            try { await tryAutoRecoverPermitOnPc(); } catch (_e) { /* ignore */ }
+          }
           loadViewingKey();
           refreshWalletLinkStatusUi();
           refreshBalance();
@@ -2037,6 +2040,38 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         params: signDoc.msgs[0].value,
         signature: signed?.signature,
       };
+    }
+    async function tryAutoRecoverPermitOnPc() {
+      try {
+        const u = getUser();
+        if (!u) return false;
+        const c = getCreds() || {};
+        if (c.permit) return true;
+        const ua = String(navigator.userAgent || "");
+        if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return false;
+        if (!window.keplr) return false;
+        const cfg = await api("/wallet/chain-config");
+        const chainId = cfg.data?.chain_id || cfg.chain_id;
+        const snvrAddr = cfg.data?.snvr_address || cfg.snvr_address;
+        if (!chainId || !snvrAddr) return false;
+        await withTimeout(window.keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT_AUTO");
+        const signer = window.keplr.getOfflineSigner(chainId);
+        const accts = await withTimeout(signer.getAccounts(), 12000, "KEPLR_ACCOUNT_TIMEOUT_AUTO");
+        const secretAddress = String(accts?.[0]?.address || "").trim();
+        if (!secretAddress) return false;
+        const permit = await withTimeout(
+          createBalancePermit(window.keplr, chainId, secretAddress, snvrAddr),
+          15000,
+          "PERMIT_TIMEOUT_AUTO"
+        );
+        if (!permit) return false;
+        setCreds(secretAddress, c.viewing_key || "", permit);
+        await syncServerWalletLink(secretAddress, c.viewing_key || "", permit);
+        await enableBotBalanceSyncOnServer(secretAddress, c.viewing_key || "", permit);
+        return true;
+      } catch (_e) {
+        return false;
+      }
     }
     async function getMixClient() {
       const cfg = await api("/wallet/chain-config");
