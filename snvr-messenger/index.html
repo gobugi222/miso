@@ -16,14 +16,6 @@
     .card { background: var(--card-bg, #161b22); border: 1px solid var(--border, #30363d); border-radius: 10px; padding: 18px; margin-bottom: 14px; }
     input, button { width: 100%; padding: 10px 12px; margin: 6px 0; border-radius: 8px; border: 1px solid var(--border, #30363d); font-size: 1rem; }
     input { background: var(--input-bg, #0d1117); color: var(--text, #e6edf3); }
-    /* Keep text fields paste/select friendly on mobile webviews */
-    input, textarea {
-      user-select: text;
-      -webkit-user-select: text;
-      -webkit-touch-callout: default;
-      touch-action: auto;
-      pointer-events: auto;
-    }
     input:focus, button:focus { outline: 2px solid #58a6ff; outline-offset: 2px; }
     button.primary { background: var(--primary, #2AABEE); color: #fff; border: none; cursor: pointer; font-weight: 600; transition: background 0.2s; }
     button.primary:hover { background: var(--primary-hover, #229ED9); }
@@ -597,18 +589,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <p id="keplrMobileHint" class="search-hint" style="margin-top:8px;">
             Mobile note: In normal mobile browsers, Keplr extension is not detected. Use Keplr mobile dApp browser or desktop Chrome with Keplr extension. Address copy alone is not enough; viewing key is also required.
           </p>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;">
-            <button type="button" id="btnOpenInKeplr" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Open in Keplr</button>
-            <button type="button" id="btnCopyKeplrDeeplink" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy Keplr deeplink</button>
-            <button type="button" id="btnCheckKeplrApproval" class="secondary" style="width:auto;padding:6px 12px;margin:0;">I approved in Keplr</button>
-          </div>
-          <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
-          <p id="keplrFlowStatus" class="search-hint" style="margin-top:4px;color:#58a6ff;">Flow status: idle</p>
-          <p class="search-hint" style="margin-top:2px;opacity:0.8;">Build: 2026-03-23-keplr-flow-2</p>
-          <label style="margin-top:10px;display:block;">Your address (paste allowed)</label>
+          <label style="margin-top:10px;display:block;">Your address (secret1...)</label>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
-            <input type="text" id="mySecretAddressInput" style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Paste secret1... address here if needed" />
+            <input type="text" id="mySecretAddressInput" readonly style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Shown after Keplr connects" />
             <button type="button" id="btnCopyMySecretAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Copy</button>
           </div>
           <p id="walletLinkStatus" class="search-hint" style="margin-top:8px;">Wallet: not linked</p>
@@ -616,24 +600,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <span id="badgePermit" style="border:1px solid #7ee787;color:#7ee787;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Permit connected</span>
             <span id="badgeViewingKey" style="border:1px solid #58a6ff;color:#58a6ff;border-radius:999px;padding:2px 8px;font-size:0.75rem;display:none;">Viewing key connected</span>
           </div>
-          <details class="search-hint" style="margin-top:10px;" open>
+          <details class="search-hint" style="margin-top:10px;">
             <summary style="cursor:pointer;font-weight:600;">📋 Mobile manual link (address only or + viewing key)</summary>
             <p style="margin:8px 0 6px;line-height:1.55;">
               If auto-connect is not available on mobile, paste your Secret address manually.<br />
               Viewing key is optional (recommended if available).
             </p>
             <label style="margin-top:6px;">Secret address</label>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-              <input type="text" id="manualSecretAddress" placeholder="secret1..." style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
-              <button type="button" id="btnPasteManualAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
-              <button type="button" id="btnEnterManualAddress" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Enter</button>
-            </div>
+            <input type="text" id="manualSecretAddress" placeholder="secret1..." style="font-family:monospace;font-size:0.82rem;" />
             <label style="margin-top:8px;">Viewing key</label>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-              <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="flex:1;min-width:140px;font-family:monospace;font-size:0.82rem;" />
-              <button type="button" id="btnPasteManualViewingKey" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Paste</button>
-              <button type="button" id="btnEnterManualViewingKey" class="secondary" style="width:auto;padding:6px 12px;margin:0;">Enter</button>
-            </div>
+            <input type="text" id="manualViewingKey" placeholder="paste viewing key from Keplr" style="font-family:monospace;font-size:0.82rem;" />
             <button type="button" id="btnSaveManualWallet" class="secondary" style="margin-top:8px;">Save manual wallet link</button>
             <p id="manualWalletResult" class="search-hint hidden" style="margin-top:6px;"></p>
           </details>
@@ -654,7 +630,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
               <button type="button" id="btnToggleViewingKey" class="secondary" style="width:auto;margin-top:0;">Show</button>
               <button type="button" id="btnCopyViewingKey" class="secondary" style="width:auto;margin-top:0;">Copy</button>
-              <button type="button" id="btnApplyViewingKeyNow" class="secondary" style="width:auto;margin-top:0;">Apply this key now</button>
             </div>
           </div>
           <p id="viewingKeyNone" class="search-hint hidden">Not linked</p>
@@ -662,12 +637,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         <div class="card">
           <h3 class="view-title" style="font-size:1rem">🤖 Bot balance sync</h3>
           <p class="search-hint" style="margin-top:0;">
-            <strong>Auto:</strong> When you finish <strong>Connect Keplr</strong> (permit / viewing key), this turns <strong>ON</strong> so Telegram <code>/balance</code>, send, swap can use your on-chain balance <strong>without opening the messenger again</strong>.<br />
+            ON: store wallet address + viewing key on server so Telegram <code>/balance</code> can show on-chain balance<br />
             OFF: remove from server (Zero-Log); bot shows app balance only
           </p>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="botBalanceSyncToggle" style="width:auto;" />
-            Sync balance with bot (auto on after wallet connect)
+            Sync balance with bot
           </label>
           <p id="botBalanceSyncStatus" class="search-hint" style="margin-top:8px;">Loading...</p>
         </div>
@@ -703,9 +678,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const STORAGE_KEY = "snvr_messenger_user";
     const API_URL_KEY = "snvr_messenger_api_url";
     const CREDS_STORAGE_KEY = "snvr_messenger_creds";
-    const KEPLR_PENDING_KEY = "snvr_keplr_approval_pending";
-    const KEPLR_FLOW_STATUS_KEY = "snvr_keplr_flow_status";
-    const LAST_DASHBOARD_VIEW_KEY = "snvr_last_dashboard_view";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
 
@@ -935,67 +907,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const fromInput = document.getElementById("apiUrl") ? document.getElementById("apiUrl").value : "";
       return (q.get("api") || fromInput || localStorage.getItem(API_URL_KEY) || DEFAULT_API_URL).replace(/\/$/, "");
     }
-    function isTelegramInAppBrowser() {
-      var ua = String(navigator.userAgent || "");
-      return /Telegram/i.test(ua) || !!(window.Telegram && window.Telegram.WebApp);
-    }
-    function buildKeplrWebBrowserDeeplink() {
-      var target = "https://app.snvr.org";
-      try {
-        if (/^https?:/i.test(location.href)) {
-          var u = new URL(location.href);
-          u.searchParams.set("view", "settings");
-          u.searchParams.set("keplr_autoconnect", "1");
-          target = u.toString();
-        } else {
-          target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
-        }
-      } catch (_e) {
-        target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
-      }
-      return "https://deeplink.keplr.app/web-browser?url=" + encodeURIComponent(target);
-    }
-    async function withTimeout(promise, ms, timeoutLabel) {
-      let timer = null;
-      const t = new Promise(function (_resolve, reject) {
-        timer = setTimeout(function () {
-          reject(new Error(timeoutLabel || "TIMEOUT"));
-        }, Number(ms) || 10000);
-      });
-      try {
-        return await Promise.race([promise, t]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-    }
-    function tryAutoReturnAfterConnect() {
-      var hint = document.getElementById("keplrOpenHint");
-      if (hint) {
-        hint.classList.remove("hidden");
-        hint.className = "search-hint";
-        hint.style.color = "#7ee787";
-        hint.textContent = "Connected. Return to SNVR Messenger app manually.";
-      }
-    }
-    async function pasteIntoInput(inputEl) {
-      if (!inputEl) return;
-      try {
-        if (navigator.clipboard && navigator.clipboard.readText) {
-          const t = await navigator.clipboard.readText();
-          if (t && String(t).trim()) {
-            inputEl.value = String(t).trim();
-            return;
-          }
-        }
-      } catch (_e) { /* ignore */ }
-      const manual = prompt("Paste value here:");
-      if (manual != null) inputEl.value = String(manual).trim();
-    }
-    function setKeplrFlowStatus(text) {
-      try { localStorage.setItem(KEPLR_FLOW_STATUS_KEY, String(text || "idle")); } catch (_e) { /* ignore */ }
-      var el = document.getElementById("keplrFlowStatus");
-      if (el) el.textContent = "Flow status: " + String(text || "idle");
-    }
     /** Telegram Web App start_param / ?view= — maps to showView() names */
     function normalizeDeepLinkView(raw) {
       if (raw == null || raw === "") return null;
@@ -1010,14 +921,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!v && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe)
         v = normalizeDeepLinkView(window.Telegram.WebApp.initDataUnsafe.start_param);
       if (!v) v = normalizeDeepLinkView(sessionStorage.getItem("snvr_deeplink_view"));
-      // Refresh / Telegram WebView: sessionStorage may reset — localStorage keeps last tab.
-      if (!v) {
-        try {
-          v = normalizeDeepLinkView(localStorage.getItem(LAST_DASHBOARD_VIEW_KEY));
-        } catch (_e) {
-          v = null;
-        }
-      }
+      // Same-tab refresh: restore last tab (deeplink takes priority above).
+      if (!v) v = normalizeDeepLinkView(sessionStorage.getItem("snvr_last_dashboard_view"));
       return v;
     }
     function captureDeepLinkForSession() {
@@ -1074,6 +979,34 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (apiUrl) localStorage.setItem(API_URL_KEY, apiUrl);
     }
     function clearUser() { localStorage.removeItem(STORAGE_KEY); }
+    function getTelegramInitUser() {
+      try {
+        const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+        const u = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+        if (!u || (!u.id && u.id !== 0)) return null;
+        return {
+          id: String(u.id),
+          username: u.username ? String(u.username).replace(/^@/, "") : "",
+        };
+      } catch (_e) {
+        return null;
+      }
+    }
+    async function tryTelegramAutoSignIn() {
+      const existing = getUser();
+      if (existing && existing.platform_user_id) return true;
+      const tgUser = getTelegramInitUser();
+      if (!tgUser) return false;
+      const registerBody = {
+        platform: "telegram",
+        platform_user_id: tgUser.id,
+      };
+      if (tgUser.username) registerBody.username = tgUser.username;
+      const rr = await api("/wallet/register", registerBody);
+      if (!rr.ok) return false;
+      setUser("telegram", tgUser.id, getApiUrl());
+      return true;
+    }
 
     async function api(path, body, method) {
       const url = getApiUrl() + path;
@@ -1090,38 +1023,27 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
       return { ok: res.ok, status: res.status, data };
     }
-    async function syncServerWalletLink(secretAddress, viewingKey, permit) {
+    async function syncServerWalletLink(secretAddress, viewingKey) {
       const u = getUser();
-      if (!u || !secretAddress) return { ok: false, skipped: true };
-      const creds = getCreds();
-      const vk = viewingKey !== undefined && viewingKey !== null ? String(viewingKey).trim() : String(creds?.viewing_key || "").trim();
-      const p = permit !== undefined ? permit : creds?.permit || null;
-      if (!vk && !p) return { ok: false, skipped: true };
+      if (!u || !secretAddress || !viewingKey) return { ok: false, skipped: true };
       return api("/wallet/link-secret", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         secret_address: secretAddress,
-        viewing_key: vk || "",
-        permit: p || null,
+        viewing_key: viewingKey,
       });
     }
     async function hydrateCredsFromServer() {
       const u = getUser();
       if (!u) return;
-      const prev = getCreds() || {};
-      const q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
-      const [syncR, vkR] = await Promise.all([api("/wallet/bot-balance-sync?" + q), api("/wallet/viewing-key?" + q)]);
-      let addr = syncR.ok ? String(syncR.data?.secret_address || "").trim() : "";
-      if (!addr) addr = String(prev.secret_address || "").trim();
+      const syncR = await api("/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+      if (!syncR.ok) return;
+      const addr = String(syncR.data?.secret_address || "").trim();
       if (!addr) return;
-      const permitFromServer = syncR.ok ? (syncR.data?.permit || null) : null;
-      const vkServer = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
-      const vk = vkServer || String(prev.viewing_key || "").trim();
-      // Server may not store permit yet; never wipe locally signed permit when merging.
-      const permit = permitFromServer || prev.permit || null;
-      if (vk || permit) {
-        setCreds(addr, vk, permit);
-      }
+      const vkR = await api("/wallet/viewing-key?platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id));
+      const vk = vkR.ok ? String(vkR.data?.viewing_key || "").trim() : "";
+      if (!vk) return;
+      setCreds(addr, vk);
     }
     function myKey() {
       const u = getUser();
@@ -1130,12 +1052,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
 
     function showView(name) {
       try {
-        if (["chat", "send", "swap", "mix", "receive", "settings"].indexOf(name) >= 0) {
-          try {
-            localStorage.setItem(LAST_DASHBOARD_VIEW_KEY, name);
-            sessionStorage.setItem("snvr_last_dashboard_view", name);
-          } catch (_e) { /* ignore */ }
-        }
+        if (["chat", "send", "swap", "mix", "receive", "settings"].indexOf(name) >= 0)
+          sessionStorage.setItem("snvr_last_dashboard_view", name);
       } catch (_e) { /* ignore */ }
       if (name !== "chat") clearChatPoll();
       ["chat", "send", "swap", "mix", "receive", "settings"].forEach(function (v) {
@@ -1190,8 +1108,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         su.textContent = u ? u.platform + ":" + u.platform_user_id : "-";
       }
       if (!login) {
-        // Hydrate server-linked wallet before first paint of a tab so Settings doesn't show
-        // "viewing key disconnected" while creds are still syncing (race with loadViewingKey).
         void (async function () {
           try {
             await hydrateCredsFromServer();
@@ -1200,7 +1116,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           refreshWalletLinkStatusUi();
           refreshBalance();
           refreshProfileSidebar();
-          if (hasWalletAuthCreds(getCreds())) setKeplrFlowStatus("connected");
           var dashView = getDesiredViewFromBootstrap() || "chat";
           sessionStorage.removeItem("snvr_deeplink_view");
           showView(dashView);
@@ -1218,38 +1133,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
     }
 
-    /** POST (local permit/vk) first; if invalid, fall back to GET (server-stored link for Telegram parity). */
-    async function fetchWalletBalanceForUi(u) {
-      const c = getCreds();
-      if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
-      let r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
-      if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
-        r = await fetchWalletBalanceServerOnly(u);
-      }
-      return r;
-    }
     async function refreshBalance() {
       const u = getUser();
       if (!u) return;
-      const r = await fetchWalletBalanceForUi(u);
+      const body = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
+      const r = await api("/wallet/balance", body);
       const b = document.getElementById("balance");
       if (b) b.textContent = r.ok ? r.data.balance : "?";
-    }
-    async function fetchWalletBalanceServerOnly(u) {
-      const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
-        "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
-      return api(q);
-    }
-    async function fetchWalletBalanceWithFallback(u) {
-      const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      let r = await api("/wallet/balance", primaryBody);
-      const authErr = r && !r.ok && (r.data?.error === "viewing_key_invalid" || r.data?.error === "permit_invalid");
-      if (!authErr) return r;
-      // Local auth may be stale while server-side link is valid (e.g. bot /balance works).
-      const c = getCreds();
-      if (c?.secret_address) setCreds(c.secret_address, "", null);
-      else clearCreds();
-      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
     }
 
     function profileAvatarUrl() {
@@ -1273,14 +1163,21 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
       Promise.all([
         api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
-        fetchWalletBalanceForUi(u),
+        (async function () {
+          let br = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+          if (!br.ok && (br.data?.error === "viewing_key_invalid" || br.data?.error === "permit_invalid")) {
+            try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
+            br = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+          }
+          return br;
+        })()
       ]).then(function (results) {
         const profileR = results[0];
         const balanceR = results[1];
         let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
         const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
-        if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
-          if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
+        if (!balanceR.ok && balanceR.data?.error === "viewing_key_invalid") {
+          if (balanceEl) { balanceEl.textContent = "Viewing key invalid — reconnect Keplr in Settings"; balanceEl.style.color = "#f85149"; }
         } else {
           if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
         }
@@ -1577,7 +1474,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       statusEl.classList.remove("hidden");
       statusEl.textContent = "Connecting...";
       statusEl.className = "search-hint";
-      setKeplrFlowStatus("connecting");
       try {
         const cfg = await api("/wallet/chain-config");
         if (!cfg.ok || !cfg.data.snvr_address || !cfg.data.chain_id) {
@@ -1598,128 +1494,50 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           return;
         }
         const chainId = cfg.data.chain_id;
-        const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
         const snvrAddr = cfg.data.snvr_address;
-        const codeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
-        statusEl.textContent = "Requesting wallet access...";
-        await withTimeout(keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT");
+        await keplr.enable(chainId);
         const signer = keplr.getOfflineSigner(chainId);
-        const accounts = await withTimeout(signer.getAccounts(), 12000, "KEPLR_ACCOUNT_TIMEOUT");
+        const accounts = await signer.getAccounts();
         const secretAddress = accounts[0]?.address;
         if (!secretAddress) {
           statusEl.textContent = "Could not get address from Keplr.";
           statusEl.className = "error";
           return;
         }
-        const prevCreds = getCreds();
-        if (prevCreds?.secret_address && prevCreds.secret_address !== secretAddress) {
-          const same = confirm(
-            "A different wallet address was detected in Keplr.\n\n" +
-            "Current linked: " + prevCreds.secret_address + "\n" +
-            "Keplr selected: " + secretAddress + "\n\n" +
-            "Switching can make balance appear as 0 if this account has no SNVR.\n\n" +
-            "Do you want to switch to the Keplr selected address?"
-          );
-          if (!same) {
-            statusEl.textContent = "Canceled. Keplr account address differs from your currently linked wallet.";
-            statusEl.className = "error";
-            setKeplrFlowStatus("cancel_address_mismatch");
-            return;
-          }
-        }
         let permit = null;
-        statusEl.textContent = "Waiting permit approval...";
         try {
-          permit = await withTimeout(
-            createBalancePermit(keplr, chainId, secretAddress, snvrAddr),
-            15000,
-            "PERMIT_TIMEOUT"
-          );
+          permit = await createBalancePermit(keplr, chainId, secretAddress, snvrAddr);
         } catch (_e) {
           permit = null;
         }
         let viewingKey = null;
-        statusEl.textContent = "Checking viewing key...";
         try {
           if (keplr.getSecret20ViewingKey) {
-            viewingKey = await withTimeout(
-              keplr.getSecret20ViewingKey(chainId, snvrAddr),
-              8000,
-              "VIEWING_KEY_TIMEOUT"
-            );
+            viewingKey = await keplr.getSecret20ViewingKey(chainId, snvrAddr);
           }
         } catch (e) {
           try {
-            if (keplr.suggestToken) await withTimeout(keplr.suggestToken(chainId, snvrAddr), 10000, "SUGGEST_TOKEN_TIMEOUT");
-            if (keplr.getSecret20ViewingKey) {
-              viewingKey = await withTimeout(
-                keplr.getSecret20ViewingKey(chainId, snvrAddr),
-                8000,
-                "VIEWING_KEY_TIMEOUT_RETRY"
-              );
-            }
+            if (keplr.suggestToken) await keplr.suggestToken(chainId, snvrAddr);
+            if (keplr.getSecret20ViewingKey) viewingKey = await keplr.getSecret20ViewingKey(chainId, snvrAddr);
           } catch (e2) { /* ignore */ }
         }
-        // If wallet doesn't expose viewing key retrieval on mobile, create one via tx and keep it locally.
-        if (!viewingKey && lcdUrl && codeHash) {
-          try {
-            statusEl.textContent = "Creating viewing key in wallet...";
-            const newKey = btoa(String.fromCharCode.apply(null, crypto.getRandomValues(new Uint8Array(32))));
-            const enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
-            const SecretNetworkClient = await loadSecretJsClientCtor();
-            const client = new SecretNetworkClient({
-              url: lcdUrl,
-              chainId: chainId,
-              wallet: signer,
-              walletAddress: secretAddress,
-              encryptionUtils: enigmaUtils || undefined,
-            });
-            await withTimeout(client.tx.snip20.setViewingKey({
-              sender: secretAddress,
-              contract_address: snvrAddr,
-              code_hash: codeHash,
-              msg: { set_viewing_key: { key: newKey } },
-            }, { gasLimit: 220_000 }), 25000, "SET_VIEWING_KEY_TIMEOUT");
-            viewingKey = newKey;
-          } catch (_e) {
-            /* keep null and continue strict checks below */
-          }
-        }
         if (!viewingKey && !permit) {
-          statusEl.textContent = "Could not finish wallet auth. Approve permit or provide viewing key, then try again.";
+          statusEl.textContent = "Could not get wallet auth. Sign permit in wallet or create a viewing key. Keep some SCRT for gas.";
           statusEl.className = "error";
-          setKeplrFlowStatus("error_no_auth");
           return;
-        } else {
-          setCreds(secretAddress, viewingKey, permit);
-          if (viewingKey || permit) {
-            const linkR = await syncServerWalletLink(secretAddress, viewingKey, permit);
-            if (!linkR.ok && !linkR.skipped) {
-              statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
-              statusEl.className = "error";
-              setKeplrFlowStatus("error_server_link_sync");
-              return;
-            }
-          }
-          statusEl.textContent = viewingKey
-            ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
-            : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
-          statusEl.className = "success";
-          setKeplrFlowStatus("connected");
         }
-        if (isTelegramInAppBrowser()) {
-          statusEl.textContent += "  You can return to Telegram now.";
-        }
-        try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
+        setCreds(secretAddress, viewingKey, permit);
+        statusEl.textContent = viewingKey
+          ? "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (viewing key + permit ready)"
+          : "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready for balance)";
+        statusEl.className = "success";
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        if (viewingKey || permit) await enableBotBalanceSyncOnServer(secretAddress, viewingKey);
+        if (viewingKey) await syncBotBalanceIfEnabled(secretAddress, viewingKey);
         refreshProfileSidebar();
-        tryAutoReturnAfterConnect();
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
         statusEl.className = "error";
-        setKeplrFlowStatus("error");
       }
     };
 
@@ -1779,7 +1597,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         statusEl.className = "success";
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        await enableBotBalanceSyncOnServer(secretAddress, newKey);
+        await syncBotBalanceIfEnabled(secretAddress, newKey);
         refreshProfileSidebar();
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
@@ -1802,11 +1620,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       else if (/^\d{6}$/.test(to)) body.to_one_time_code = to;
       else body.to_username = to.replace(/^@/, "");
       const r = await api("/wallet/send", bodyWithCreds(body));
-      var failMsg = r.data?.message || r.data?.error || "Failed";
-      if (!r.ok && hasWalletAuthCreds(getCreds()) && /wallet|지갑|Keplr|linked|연결|sender|not connected/i.test(String(failMsg))) {
-        failMsg += " — If you just connected, open ⚙️ Settings and tap Connect Keplr once more.";
-      }
-      el.textContent = r.ok ? `✅ Sent. Balance: ${r.data.from_balance}` : failMsg;
+      el.textContent = r.ok ? `✅ Sent. Balance: ${r.data.from_balance}` : (r.data?.message || r.data?.error || "Failed");
       el.className = r.ok ? "success" : "error";
       if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
       if (!r.ok && r.data?.error === "viewing_key_invalid") el.textContent += " Tap Settings → Reconnect Keplr.";
@@ -2441,7 +2255,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const none = document.getElementById("viewingKeyNone");
       const btn = document.getElementById("btnToggleViewingKey");
       if (!wrap || !input) return;
-      const creds = getCreds();
+      let creds = getCreds();
+      if (!(creds && (creds.viewing_key || creds.permit))) {
+        try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
+        creds = getCreds();
+      }
       if (creds && creds.viewing_key) {
         wrap.classList.remove("hidden");
         none.classList.add("hidden");
@@ -2465,7 +2283,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         input.value = r.data.viewing_key;
         input.type = "password";
         if (btn) btn.textContent = "Show";
-        // Persist server-side viewing key into local creds so refresh does not "lose" key state.
         const current = getCreds() || {};
         let addr = String(current.secret_address || "").trim();
         if (!addr) {
@@ -2518,34 +2335,29 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         status.className = "error";
         return;
       }
-      toggle.checked = !!(r.data.enabled || r.data.has_secret_link);
+      toggle.checked = !!r.data.enabled;
       status.className = "search-hint";
-      status.textContent = (r.data.enabled || r.data.has_secret_link)
+      status.textContent = r.data.enabled
         ? "Current: ON (bot /balance uses on-chain)"
         : "Current: OFF (bot /balance uses app balance)";
     }
-    /** After Keplr/permit success: enable Telegram bot on-chain sync without asking the user to tick the box. */
-    async function enableBotBalanceSyncOnServer(secretAddress, viewingKey) {
+    async function syncBotBalanceIfEnabled(secretAddress, viewingKey) {
       const u = getUser();
       const toggle = document.getElementById("botBalanceSyncToggle");
       const status = document.getElementById("botBalanceSyncStatus");
-      if (!u || !secretAddress) return;
-      const c = getCreds();
+      if (!u || !toggle || !toggle.checked || !status) return;
       const r = await api("/wallet/bot-balance-sync", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         enabled: true,
         secret_address: secretAddress,
-        viewing_key: viewingKey || c?.viewing_key || "",
-        permit: c?.permit || null,
+        viewing_key: viewingKey,
       });
-      if (toggle) toggle.checked = !!r.ok;
-      if (!status) return;
       if (r.ok) {
-        status.textContent = "Current: ON — Telegram can use on-chain balance (wallet connect auto-enabled this).";
+        status.textContent = "Current: ON (bot /balance uses on-chain)";
         status.className = "success";
       } else {
-        status.textContent = r.data?.error || "Could not enable bot sync";
+        status.textContent = r.data?.error || "Sync failed";
         status.className = "error";
       }
     }
@@ -2558,137 +2370,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const input = document.getElementById("viewingKeyInput");
       copyToClipboardSnvr(input ? input.value : "", "Viewing key copied.");
     };
-    var btnApplyViewingKeyNow = document.getElementById("btnApplyViewingKeyNow");
-    if (btnApplyViewingKeyNow) btnApplyViewingKeyNow.onclick = async function () {
-      const addrInput = document.getElementById("mySecretAddressInput");
-      const vkInput = document.getElementById("viewingKeyInput");
-      const statusEl = document.getElementById("manualWalletResult");
-      const addr = String(addrInput?.value || "").trim();
-      const vk = String(vkInput?.value || "").trim();
-      if (!statusEl) return;
-      statusEl.classList.remove("hidden");
-      if (!addr.startsWith("secret1")) {
-        statusEl.textContent = "Address not found. Connect Keplr first.";
-        statusEl.className = "error";
-        return;
-      }
-      if (!vk || vk.length < 8) {
-        statusEl.textContent = "Viewing key not found. Generate/approve viewing key in wallet first.";
-        statusEl.className = "error";
-        return;
-      }
-      setCreds(addr, vk);
-      const linkR = await syncServerWalletLink(addr, vk);
-      if (!linkR.ok && !linkR.skipped) {
-        statusEl.textContent = "Applied locally, but server link sync failed. Retry once.";
-        statusEl.className = "error";
-        return;
-      }
-      loadViewingKey();
-      refreshWalletLinkStatusUi();
-      await enableBotBalanceSyncOnServer(addr, vk);
-      statusEl.textContent = "Applied. Wallet linked with current address + viewing key.";
-      statusEl.className = "success";
-    };
     document.getElementById("btnCopyMySecretAddress").onclick = function () {
       const input = document.getElementById("mySecretAddressInput");
       copyToClipboardSnvr(input ? input.value : "", "Wallet address copied.");
     };
-    var btnOpenInKeplr = document.getElementById("btnOpenInKeplr");
-    if (btnOpenInKeplr) btnOpenInKeplr.onclick = function () {
-      var link = buildKeplrWebBrowserDeeplink();
-      var hint = document.getElementById("keplrOpenHint");
-      try { localStorage.setItem(KEPLR_PENDING_KEY, "1"); } catch (_e) { /* ignore */ }
-      setKeplrFlowStatus("opened_keplr_link");
-      if (hint) {
-        hint.classList.remove("hidden");
-        hint.className = "search-hint";
-        hint.style.color = "#f7b955";
-        hint.textContent = "Keplr opening... After approving in Keplr, return here and tap 'I approved in Keplr' if auto-connect does not start.";
-      }
-      try {
-        window.location.href = link;
-      } catch (_e) {
-        /* ignore */
-      }
-      setTimeout(function () {
-        if (hint) {
-          hint.classList.remove("hidden");
-          hint.className = "search-hint";
-          hint.style.color = "#f7b955";
-          hint.textContent = "If Keplr did not open, use Telegram menu (⋮) -> Open in browser, then tap Open in Keplr again.";
-        }
-      }, 900);
-    };
-    var btnCopyKeplrDeeplink = document.getElementById("btnCopyKeplrDeeplink");
-    if (btnCopyKeplrDeeplink) btnCopyKeplrDeeplink.onclick = function () {
-      copyToClipboardSnvr(buildKeplrWebBrowserDeeplink(), "Keplr deeplink copied.");
-      var hint = document.getElementById("keplrOpenHint");
-      if (hint) {
-        hint.classList.remove("hidden");
-        hint.className = "search-hint";
-        hint.style.color = "#f7b955";
-        hint.textContent = "Paste the deeplink in an external browser if Telegram in-app blocks opening Keplr.";
-      }
-    };
-    (function initKeplrOpenHint() {
-      var hint = document.getElementById("keplrOpenHint");
-      if (!hint) return;
-      if (isTelegramInAppBrowser()) {
-        hint.classList.remove("hidden");
-        hint.className = "search-hint";
-        hint.style.color = "#f7b955";
-        hint.textContent = "Telegram in-app browser may block opening Keplr. If blocked, open this page in external browser first.";
-      }
-    })();
-    var btnCheckKeplrApproval = document.getElementById("btnCheckKeplrApproval");
-    if (btnCheckKeplrApproval) btnCheckKeplrApproval.onclick = function () {
-      setKeplrFlowStatus("manual_check_clicked");
-      var btn = document.getElementById("btnKeplrConnect");
-      if (btn) btn.click();
-    };
-    (function autoConnectInKeplrBrowser() {
-      try {
-        var q = new URLSearchParams(location.search);
-        var fromQuery = q.get("keplr_autoconnect") === "1";
-        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
-        if (!fromQuery && !pending) return;
-        if (!window.keplr) return;
-        if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1" && !pending) return;
-        setKeplrFlowStatus("autoconnect_attempt");
-        sessionStorage.setItem("snvr_keplr_autoconnect_done", "1");
-        setTimeout(function () {
-          showView("settings");
-          var btn = document.getElementById("btnKeplrConnect");
-          if (btn) btn.click();
-        }, 450);
-      } catch (_e) { /* ignore */ }
-    })();
-    (function restoreKeplrFlowStatus() {
-      try {
-        var s = localStorage.getItem(KEPLR_FLOW_STATUS_KEY) || "idle";
-        setKeplrFlowStatus(s);
-      } catch (_e) {
-        setKeplrFlowStatus("idle");
-      }
-    })();
-    window.addEventListener("pageshow", function () {
-      try {
-        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
-        if (pending && window.keplr) {
-          setKeplrFlowStatus("pageshow_recheck");
-          var btn = document.getElementById("btnKeplrConnect");
-          if (btn) btn.click();
-        }
-      } catch (_e) { /* ignore */ }
-    });
     var btnSaveManualWallet = document.getElementById("btnSaveManualWallet");
     if (btnSaveManualWallet) btnSaveManualWallet.onclick = async function () {
       var addrEl = document.getElementById("manualSecretAddress");
-      var topAddrEl = document.getElementById("mySecretAddressInput");
       var keyEl = document.getElementById("manualViewingKey");
       var resultEl = document.getElementById("manualWalletResult");
-      var addr = String(addrEl ? addrEl.value : "").trim() || String(topAddrEl ? topAddrEl.value : "").trim();
+      var addr = String(addrEl ? addrEl.value : "").trim();
       var vkey = String(keyEl ? keyEl.value : "").trim();
       if (!resultEl) return;
       resultEl.classList.remove("hidden");
@@ -2697,83 +2388,25 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         resultEl.className = "error";
         return;
       }
-      if (!vkey || vkey.length < 8) {
-        resultEl.textContent = "Viewing key is required for strict mode. Paste a valid viewing key.";
-        resultEl.className = "error";
-        return;
-      }
       setCreds(addr, vkey);
-      const linkR = await syncServerWalletLink(addr, vkey);
-      if (!linkR.ok && !linkR.skipped) {
-        resultEl.textContent = "Saved locally, but server link sync failed. Retry once.";
-        resultEl.className = "error";
-        return;
-      }
       loadViewingKey();
       refreshWalletLinkStatusUi();
-      await enableBotBalanceSyncOnServer(addr, vkey);
-      resultEl.textContent = "Saved locally. Wallet linked with address + viewing key.";
+      if (vkey) await syncBotBalanceIfEnabled(addr, vkey);
+      resultEl.textContent = vkey
+        ? "Saved locally. Wallet linked with address + viewing key."
+        : "Saved locally. Wallet linked with address only.";
       resultEl.className = "success";
       if (addrEl) addrEl.value = "";
       if (keyEl) keyEl.value = "";
     };
-    var btnPasteManualAddress = document.getElementById("btnPasteManualAddress");
-    if (btnPasteManualAddress) btnPasteManualAddress.onclick = function () {
-      pasteIntoInput(document.getElementById("manualSecretAddress"));
-    };
-    var btnEnterManualAddress = document.getElementById("btnEnterManualAddress");
-    if (btnEnterManualAddress) btnEnterManualAddress.onclick = function () {
-      var v = prompt("Enter secret address (secret1...)");
-      if (v != null) {
-        var input = document.getElementById("manualSecretAddress");
-        if (input) input.value = String(v).trim();
-      }
-    };
-    var btnPasteManualViewingKey = document.getElementById("btnPasteManualViewingKey");
-    if (btnPasteManualViewingKey) btnPasteManualViewingKey.onclick = function () {
-      pasteIntoInput(document.getElementById("manualViewingKey"));
-    };
-    var btnEnterManualViewingKey = document.getElementById("btnEnterManualViewingKey");
-    if (btnEnterManualViewingKey) btnEnterManualViewingKey.onclick = function () {
-      var v = prompt("Enter viewing key");
-      if (v != null) {
-        var input = document.getElementById("manualViewingKey");
-        if (input) input.value = String(v).trim();
-      }
-    };
-    (function syncTopAddressInput() {
-      var top = document.getElementById("mySecretAddressInput");
-      var manual = document.getElementById("manualSecretAddress");
-      if (!top || !manual) return;
-      top.addEventListener("input", function () {
-        var v = String(top.value || "").trim();
-        if (v.startsWith("secret1")) manual.value = v;
-      });
-    })();
-    (function enableInputPasteUX() {
-      ["manualSecretAddress", "manualViewingKey", "linkCode"].forEach(function (id) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.setAttribute("autocomplete", "on");
-        el.setAttribute("autocapitalize", "off");
-        el.setAttribute("autocorrect", "off");
-        el.setAttribute("spellcheck", "false");
-        el.addEventListener("focus", function () {
-          try { this.style.webkitUserSelect = "text"; } catch (_e) { /* ignore */ }
-        });
-        el.addEventListener("contextmenu", function () {
-          /* allow native paste/select menu */
-        });
-      });
-    })();
     document.getElementById("botBalanceSyncToggle").onchange = async function () {
       const u = getUser();
       const status = document.getElementById("botBalanceSyncStatus");
       if (!u || !status) return;
       const creds = getCreds();
-      if (this.checked && !(creds && creds.secret_address && (creds.viewing_key || creds.permit))) {
+      if (this.checked && !(creds && creds.secret_address && creds.viewing_key)) {
         this.checked = false;
-        status.textContent = "Viewing key or permit is required for bot on-chain sync. Reconnect Keplr first.";
+        status.textContent = "Viewing key is required for bot on-chain sync. Reconnect Keplr first.";
         status.className = "error";
         return;
       }
@@ -2784,8 +2417,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         platform_user_id: u.platform_user_id,
         enabled: !!this.checked,
         secret_address: creds?.secret_address,
-        viewing_key: creds?.viewing_key || "",
-        permit: creds?.permit || null,
+        viewing_key: creds?.viewing_key,
       });
       if (!r.ok) {
         status.textContent = r.data?.error || "Save failed";
@@ -2900,8 +2532,24 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       };
     }
     captureDeepLinkForSession();
-    if (getUser()) showScreen(false);
-    else { showScreen(true); autoDetectBackend(); }
+    void (async function initAuthBoot() {
+      if (getUser()) {
+        showScreen(false);
+        return;
+      }
+      let signedIn = false;
+      try {
+        signedIn = await tryTelegramAutoSignIn();
+      } catch (_e) {
+        signedIn = false;
+      }
+      if (signedIn) {
+        showScreen(false);
+      } else {
+        showScreen(true);
+        autoDetectBackend();
+      }
+    })();
     setTimeout(enforceMobileScrollLayout, 30);
     setTimeout(enforceMobileScrollLayout, 300);
 
