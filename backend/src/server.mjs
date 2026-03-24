@@ -292,18 +292,23 @@ app.get("/wallet/balance", async (req, res) => {
 
 function parsePermitInput(rawPermit) {
   if (!rawPermit) return null;
-  if (typeof rawPermit === "object") {
-    const exp = Number(rawPermit.expires_at || 0);
+  const sanitizePermit = (obj) => {
+    if (!obj || typeof obj !== "object") return null;
+    const exp = Number(obj.expires_at || 0);
     if (Number.isFinite(exp) && exp > 0 && exp <= Date.now()) return null;
-    return rawPermit;
+    // Session metadata may exist on client; query permit must be pure { params, signature }.
+    const params = obj.params;
+    const signature = obj.signature;
+    if (!params || !signature || typeof params !== "object" || typeof signature !== "object") return null;
+    return { params, signature };
+  };
+  if (typeof rawPermit === "object") {
+    return sanitizePermit(rawPermit);
   }
   if (typeof rawPermit !== "string") return null;
   try {
     const parsed = JSON.parse(rawPermit);
-    if (!(parsed && typeof parsed === "object")) return null;
-    const exp = Number(parsed.expires_at || 0);
-    if (Number.isFinite(exp) && exp > 0 && exp <= Date.now()) return null;
-    return parsed;
+    return sanitizePermit(parsed);
   } catch (_e) {
     return null;
   }
