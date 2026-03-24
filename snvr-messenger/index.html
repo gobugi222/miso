@@ -1316,6 +1316,18 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           r = serverR;
         }
       }
+      // Self-heal: if still memory source while local permit exists, force server re-link once.
+      if (r.ok && String(r.data?.source || "") === "memory") {
+        const c2 = getCreds();
+        if (c2?.secret_address && isPermitSessionValid(c2?.permit)) {
+          try {
+            await syncServerWalletLink(c2.secret_address, "", c2.permit);
+            await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
+            const retry = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+            if (retry?.ok) r = retry;
+          } catch (_e) { /* ignore */ }
+        }
+      }
       return r;
     }
     async function refreshBalance() {
