@@ -528,6 +528,7 @@ bot.command("route", async (ctx) => {
 const WALLET_MSG = {
   ko: {
     noBackend: "지갑 기능을 쓰려면 .env에 BACKEND_URL을 설정하고 백엔드를 실행해 주세요.",
+    balancePending: "⏳ 잔액 조회 중… (잠시만요)",
     balanceFail: "잔액 조회 실패.",
     balance: (b) => `💰 SNVR 잔액: ${b}`,
     sendUsage: "사용법: /send @친구이름 금액 또는 /send 받기코드 금액\n예: /send @john 10\n예: /send 123456 5",
@@ -551,6 +552,7 @@ const WALLET_MSG = {
   },
   ja: {
     noBackend: "ウォレット機能を使うには.envにBACKEND_URLを設定し、バックエンドを起動してください。",
+    balancePending: "⏳ 残高を確認しています…",
     balanceFail: "残高照会に失敗しました。",
     balance: (b) => `💰 SNVR残高: ${b}`,
     sendUsage: "使い方: /send @友達 金額 または /send 受取コード 金額\n例: /send @john 10\n例: /send 123456 5",
@@ -574,6 +576,7 @@ const WALLET_MSG = {
   },
   en: {
     noBackend: "Set BACKEND_URL in .env and run the backend for wallet features.",
+    balancePending: "⏳ Checking balance…",
     balanceFail: "Balance check failed.",
     balance: (b) => `💰 SNVR balance: ${b}`,
     sendUsage: "Usage: /send @friend amount or /send code amount\nEx: /send @john 10\nEx: /send 123456 5",
@@ -602,9 +605,28 @@ bot.command("balance", async (ctx) => {
   const m = WALLET_MSG[getLang(ctx)] || WALLET_MSG.en;
   if (!BACKEND_URL) return ctx.reply(m.noBackend);
   const userId = getUserId(ctx);
-  const res = await callBackendGet(`/wallet/balance?platform=telegram&platform_user_id=${encodeURIComponent(userId)}&locale=${getLang(ctx)}`);
-  if (!res?.ok) return ctx.reply(res?.data?.error || m.balanceFail);
-  return ctx.reply(m.balance(res.data.balance));
+  const lang = getLang(ctx);
+  const chatId = ctx.chat?.id;
+  const pendingMsg = await ctx.reply(m.balancePending);
+  const messageId = pendingMsg.message_id;
+  void (async () => {
+    try {
+      const res = await callBackendGet(
+        `/wallet/balance?platform=telegram&platform_user_id=${encodeURIComponent(userId)}&locale=${lang}`
+      );
+      const text = !res?.ok ? res?.data?.error || m.balanceFail : m.balance(res.data.balance);
+      await ctx.telegram.editMessageText(chatId, messageId, undefined, text);
+    } catch (e) {
+      console.warn("[balance] async update failed:", e?.message);
+      try {
+        await ctx.telegram.editMessageText(chatId, messageId, undefined, m.balanceFail);
+      } catch (_) {
+        try {
+          await ctx.reply(m.balanceFail);
+        } catch (_2) { /* ignore */ }
+      }
+    }
+  })();
 });
 
 bot.command("send", async (ctx) => {
