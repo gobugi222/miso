@@ -1330,11 +1330,18 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       try {
         const direct = await fetchWalletBalanceClientDirect(u);
         if (direct && direct.ok) return direct;
-      } catch (_eDirect) { /* ignore */ }
+        window.__snvr_last_direct_chain_err = null;
+      } catch (eDirect) {
+        try { window.__snvr_last_direct_chain_err = String(eDirect && (eDirect.message || eDirect) || "client_chain_error"); } catch (_e2) { /* ignore */ }
+      }
       // chain 조회가 느려도 UI가 멈추지 않게 backend 예산(budget_ms) 강제
       var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
       rBody.budget_ms = 25000;
       let r = await api("/wallet/balance", rBody);
+      if (r && r.ok && r.data && String(r.data.source || "") !== "chain") {
+        const derr = window.__snvr_last_direct_chain_err;
+        if (derr) r.data.client_chain_error = String(derr).slice(0, 160);
+      }
       let hadAuthFallback = false;
       if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
         // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
@@ -1499,8 +1506,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const addr = String(c.secret_address || "").trim();
       const shortAddr = addr ? maskSecretAddress(addr) : "-";
       const hasPermit = isPermitSessionValid(c.permit) ? "yes" : "no";
+      const directErr = resp?.data?.client_chain_error || window.__snvr_last_direct_chain_err || "";
+      const derrHint = directErr ? (" | client_chain_err=" + String(directErr).slice(0, 90)) : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + derrHint;
     }
 
     function profileAvatarUrl() {
