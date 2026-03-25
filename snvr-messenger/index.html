@@ -1325,6 +1325,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function fetchWalletBalanceForUi(u) {
       const c = getCreds();
       if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
+      // Best-effort: query chain directly in the client (Zero-Log) to match *real wallet balance*
+      // even when backend LCD is slow/unreliable.
+      try {
+        const direct = await fetchWalletBalanceClientDirect(u);
+        if (direct && direct.ok) return direct;
+      } catch (_eDirect) { /* ignore */ }
       // chain 조회가 느려도 UI가 멈추지 않게 backend 예산(budget_ms) 강제
       var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
       rBody.budget_ms = 25000;
@@ -1368,6 +1374,47 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       if (hadAuthFallback && r?.ok && r?.data && !r.data.auth) r.data.auth = "auth_fallback";
       return r;
+    }
+
+    async function fetchWalletBalanceClientDirect(u) {
+      const c = getCreds() || {};
+      if (!c.secret_address) return null;
+      if (!isPermitSessionValid(c.permit) && !c.viewing_key) return null;
+      // Need token contract + code hash from backend chain-config (fast) or defaults.
+      const cfgR = await api("/wallet/chain-config");
+      const d = cfgR && cfgR.data ? cfgR.data : (cfgR || {});
+      const chainId = d.chain_id || DEFAULT_CHAIN_ID;
+      const lcdUrl = d.lcd_url || "https://lcd.secret.express";
+      const snvrAddr = d.snvr_address || DEFAULT_SNVR_CONTRACT;
+      const snvrCodeHash = d.snvr_code_hash || DEFAULT_SNVR_CODE_HASH;
+      if (!snvrAddr || !snvrCodeHash) return null;
+
+      const SecretNetworkClient = await loadSecretJsClientCtor();
+      // Query-only client (no wallet needed). Permit/viewing-key auth happens in the query payload.
+      const client = new SecretNetworkClient({ url: lcdUrl, chainId });
+
+      const doQuery = async function () {
+        if (isPermitSessionValid(c.permit)) {
+          const r1 = await client.query.snip20.getBalance({
+            contract: { address: snvrAddr, code_hash: snvrCodeHash },
+            address: String(c.secret_address).trim(),
+            auth: { permit: c.permit },
+          });
+          return r1?.balance?.amount ?? "0";
+        }
+        const r2 = await client.query.snip20.getBalance({
+          contract: { address: snvrAddr, code_hash: snvrCodeHash },
+          address: String(c.secret_address).trim(),
+          auth: { key: String(c.viewing_key || "").trim() },
+        });
+        return r2?.balance?.amount ?? "0";
+      };
+
+      // Hard upper bound so UI never hangs on client LCD either.
+      const amountRaw = await withTimeout(doQuery(), 7000, "CLIENT_CHAIN_BAL_TIMEOUT");
+      const human = Number(amountRaw) / 1e9;
+      if (!Number.isFinite(human) || human < 0) return null;
+      return { ok: true, status: 200, data: { balance: human, source: "client_chain", auth: isPermitSessionValid(c.permit) ? "permit" : "viewing_key" } };
     }
     async function refreshBalance() {
       const u = getUser();
