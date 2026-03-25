@@ -35,10 +35,10 @@ app.use((req, res, next) => {
 const PORT = Number(process.env.PORT) || 3000;
 const MOCK = process.env.MOCK_AZTEC !== undefined && process.env.MOCK_AZTEC !== "0";
 const USE_SECRET = process.env.SECRET_NETWORK === "1" && isSecretEnabled();
-/** /wallet/balance 체인 LCD 경로 전체 상한 — 무응답 시 Edge/클라이언트가 끊기기 전에 JSON 응답 */
+/** /wallet/balance 체인 LCD 경로 전체 상한 — secret.mjs 최악(여러 LCD×permit 프로브)보다 짧으면 err=BUDGET·0 잔액으로 보임 */
 const BALANCE_CHAIN_BUDGET_MS = Math.max(
   20000,
-  Math.min(170000, Number(process.env.BALANCE_CHAIN_BUDGET_MS) || 110000)
+  Math.min(300000, Number(process.env.BALANCE_CHAIN_BUDGET_MS) || 260000)
 );
 function withChainBudget(promise) {
   return Promise.race([

@@ -15,6 +15,17 @@ let txClient = null;
 
 const DECIMALS = 9;
 
+/** 한 LCD URL에서 잔액 조회 시 최대 대기 (무응답 노드로 10분+ 걸리는 것 방지) */
+const LCD_PROBE_PER_URL_MS = Number(process.env.LCD_PROBE_PER_URL_MS) || 20000;
+const LCD_MAX_URLS = Math.max(1, Math.min(6, Number(process.env.LCD_MAX_URLS) || 4));
+
+function withLcdTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("LCD_TIMEOUT_" + ms + "ms")), ms)),
+  ]);
+}
+
 /** mainnet 조회용: 한 LCD가 HTML/502/invalid json을 줄 때 순서대로 재시도 */
 function getLcdCandidates() {
   loadConfig();
@@ -25,17 +36,20 @@ function getLcdCandidates() {
     .filter(Boolean);
   const chain = String(config.chain_id || "");
   const isMainnet = chain === "secret-4" || chain.includes("secret-4");
-  const baked = isMainnet
-    ? ["https://lcd.secret.express", "https://rest.lavenderfive.com/secretnetwork"]
-    : [];
+  /** secret-4: Railway LCD_URL이 느린 노드면 첫 URL에서 예산만 태움 → express 먼저 */
+  const mainnetFast = "https://lcd.secret.express";
+  const mainnetBaked = ["https://rest.lavenderfive.com/secretnetwork"];
   const out = [];
   const seen = new Set();
-  for (const u of [primary, ...fromEnv, ...baked]) {
+  const ordered = isMainnet
+    ? [mainnetFast, primary, ...fromEnv, ...mainnetBaked]
+    : [primary, ...fromEnv];
+  for (const u of ordered) {
     if (!u || seen.has(u)) continue;
     seen.add(u);
     out.push(u);
   }
-  return out;
+  return out.slice(0, LCD_MAX_URLS);
 }
 
 function forceLcdUrl(url) {
@@ -124,11 +138,14 @@ export async function getSnvrBalance(address, viewingKey) {
     forceLcdUrl(url);
     try {
       const client = getQueryClient();
-      const result = await client.query.snip20.getBalance({
-        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
-        address: String(address).trim(),
-        auth: { key: String(viewingKey).trim() },
-      });
+      const result = await withLcdTimeout(
+        client.query.snip20.getBalance({
+          contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+          address: String(address).trim(),
+          auth: { key: String(viewingKey).trim() },
+        }),
+        LCD_PROBE_PER_URL_MS
+      );
       const amount = result?.balance?.amount ?? "0";
       return amount;
     } catch (e) {
@@ -224,7 +241,14 @@ export async function getSnvrBalanceWithPermitProbe(address, permit) {
   for (const url of urls) {
     forceLcdUrl(url);
     try {
-      const once = await getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c);
+      const once = await withLcdTimeout(
+        getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c),
+        LCD_PROBE_PER_URL_MS * 2
+      ).catch((e) => ({
+        ok: false,
+        error_code: "QUERY_FAILED",
+        errors: [String(e?.message || "lcd_probe_failed")],
+      }));
       if (once.ok) return { ...once, lcd_used: url };
       if (once.error_code === "PERMIT_INVALID") return once;
       last = { ...once, lcd_tried: url };
