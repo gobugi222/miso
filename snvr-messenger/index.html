@@ -1326,17 +1326,43 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const c = getCreds();
       if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
       // Best-effort: query chain directly in the client (Zero-Log) to match *real wallet balance*
-      // even when backend LCD is slow/unreliable.
+      // even when backend LCD is slow/unreliable. Do it in background so UI stays instant.
       try {
-        const direct = await fetchWalletBalanceClientDirect(u);
-        if (direct && direct.ok) return direct;
-        window.__snvr_last_direct_chain_err = null;
-      } catch (eDirect) {
-        try { window.__snvr_last_direct_chain_err = String(eDirect && (eDirect.message || eDirect) || "client_chain_error"); } catch (_e2) { /* ignore */ }
-      }
+        const cached = window.__snvr_last_client_chain_balance;
+        if (cached && cached.user_key === (u.platform + ":" + u.platform_user_id) && Date.now() - Number(cached.at || 0) < 30000) {
+          return { ok: true, status: 200, data: { balance: cached.balance, source: "client_chain_cache", auth: cached.auth || "permit" } };
+        }
+      } catch (_eCache) { /* ignore */ }
+      try {
+        if (!window.__snvr_client_chain_inflight) {
+          window.__snvr_client_chain_inflight = true;
+          void (async function () {
+            try {
+              const direct = await fetchWalletBalanceClientDirect(u, { timeout_ms: 20000 });
+              if (direct && direct.ok && direct.data) {
+                window.__snvr_last_client_chain_balance = {
+                  user_key: u.platform + ":" + u.platform_user_id,
+                  at: Date.now(),
+                  balance: Number(direct.data.balance || 0),
+                  auth: direct.data.auth || "permit",
+                };
+                // Update UI if still on same user.
+                const b = document.getElementById("balance");
+                if (b) b.textContent = String(direct.data.balance);
+                setBalanceDebug(direct, u);
+              }
+              window.__snvr_last_direct_chain_err = null;
+            } catch (eDirect) {
+              try { window.__snvr_last_direct_chain_err = String(eDirect && (eDirect.message || eDirect) || "client_chain_error"); } catch (_e2) { /* ignore */ }
+            } finally {
+              window.__snvr_client_chain_inflight = false;
+            }
+          })();
+        }
+      } catch (_eBg) { /* ignore */ }
       // chain 조회가 느려도 UI가 멈추지 않게 backend 예산(budget_ms) 강제
       var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      rBody.budget_ms = 25000;
+      rBody.budget_ms = 1500;
       let r = await api("/wallet/balance", rBody);
       if (r && r.ok && r.data && String(r.data.source || "") !== "chain") {
         const derr = window.__snvr_last_direct_chain_err;
@@ -1383,7 +1409,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       return r;
     }
 
-    async function fetchWalletBalanceClientDirect(u) {
+    async function fetchWalletBalanceClientDirect(u, opt) {
       const c = getCreds() || {};
       if (!c.secret_address) return null;
       if (!isPermitSessionValid(c.permit) && !c.viewing_key) return null;
@@ -1423,7 +1449,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       };
 
       // Hard upper bound so UI never hangs on client LCD either.
-      const amountRaw = await withTimeout(doQuery(), 7000, "CLIENT_CHAIN_BAL_TIMEOUT");
+      const tms = opt && Number(opt.timeout_ms) ? Number(opt.timeout_ms) : 7000;
+      const amountRaw = await withTimeout(doQuery(), tms, "CLIENT_CHAIN_BAL_TIMEOUT");
       const human = Number(amountRaw) / 1e9;
       if (!Number.isFinite(human) || human < 0) return null;
       return { ok: true, status: 200, data: { balance: human, source: "client_chain", auth: isPermitSessionValid(c.permit) ? "permit" : "viewing_key" } };
