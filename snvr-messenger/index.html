@@ -1333,14 +1333,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
       // chain 조회가 느려도 UI가 멈추지 않게 backend 예산(budget_ms) 강제
       var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      rBody.budget_ms = 8000;
+      rBody.budget_ms = 25000;
       let r = await api("/wallet/balance", rBody);
       let hadAuthFallback = false;
       if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
         // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
         var rBody2 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-        rBody2.budget_ms = 8000;
+        rBody2.budget_ms = 25000;
         r = await api("/wallet/balance", rBody2);
         if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
           hadAuthFallback = true;
@@ -1366,7 +1366,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             await syncServerWalletLink(c2.secret_address, "", c2.permit);
             await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
             var rBody3 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-            rBody3.budget_ms = 8000;
+            rBody3.budget_ms = 25000;
             const retry = await api("/wallet/balance", rBody3);
             if (retry?.ok) r = retry;
           } catch (_e) { /* ignore */ }
@@ -1407,7 +1407,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               try {
                 const r2 = await api(
                   "/wallet/balance",
-                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 30000 })
+                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 50000 })
                 );
                 if (r2 && r2.ok && r2.data) {
                   const src2 = String(r2.data.source || "");
@@ -1426,12 +1426,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
     async function fetchWalletBalanceServerOnly(u) {
       const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
-        "&platform_user_id=" + encodeURIComponent(u.platform_user_id) + "&budget_ms=8000";
+        "&platform_user_id=" + encodeURIComponent(u.platform_user_id) + "&budget_ms=25000";
       return api(q);
     }
     async function fetchWalletBalanceWithFallback(u) {
       const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      primaryBody.budget_ms = 8000;
+      primaryBody.budget_ms = 25000;
       let r = await api("/wallet/balance", primaryBody);
       const authErr = r && !r.ok && (r.data?.error === "viewing_key_invalid" || r.data?.error === "permit_invalid");
       if (!authErr) return r;
@@ -1439,7 +1439,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const c = getCreds();
       if (c?.secret_address) setCreds(c.secret_address, "", null);
       else clearCreds();
-      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 8000 });
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 25000 });
     }
     function setBalanceDebug(resp, u) {
       const el = document.getElementById("balanceDebug");
