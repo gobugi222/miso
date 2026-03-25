@@ -16,8 +16,10 @@ let txClient = null;
 const DECIMALS = 9;
 
 /** ??LCD URL?먯꽌 ?붿븸 議고쉶 ??理쒕? ?湲?(臾댁쓳???몃뱶濡?10遺? 嫄몃━??寃?諛⑹?) */
-const LCD_PROBE_PER_URL_MS = Number(process.env.LCD_PROBE_PER_URL_MS) || 20000;
-const LCD_MAX_URLS = Math.max(1, Math.min(6, Number(process.env.LCD_MAX_URLS) || 4));
+// LCD가 순간 장애/지연되면 permit 조회가 오래 물려서 UI가 멈추는 문제가 생긴다.
+// 기본값을 줄여서 실패가 빨리 나고, 후보 URL도 줄여 전체 지연을 제한한다.
+const LCD_PROBE_PER_URL_MS = Math.max(4000, Math.min(20000, Number(process.env.LCD_PROBE_PER_URL_MS) || 8000));
+const LCD_MAX_URLS = Math.max(1, Math.min(3, Number(process.env.LCD_MAX_URLS) || 2));
 
 function withLcdTimeout(promise, ms) {
   return Promise.race([
