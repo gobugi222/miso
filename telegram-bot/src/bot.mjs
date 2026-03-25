@@ -18,6 +18,10 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_SEARCH_MODEL = process.env.GEMINI_SEARCH_MODEL || "gemini-1.5-flash";
 const SEARCH_RESULTS_MAX = 7;
 const AD_STATE_PATH = join(process.cwd(), "data", "ad-state.json");
+/** 백엔드 fetch 상한. 체인 LCD가 느리면 봇이 Telegraf 90초 한도에 걸리지 않게 먼저 끊음 */
+const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.BACKEND_FETCH_TIMEOUT_MS) || 45000;
+/** Telegraf 기본 handlerTimeout=90초 → LCD 재시도 시 초과. 백엔드가 느릴 여유 */
+const TELEGRAM_HANDLER_TIMEOUT_MS = Number(process.env.TELEGRAM_HANDLER_TIMEOUT_MS) || 180000;
 
 const USER_LANG = new Map(); // userId -> "en" | "ko" | "ja"
 
@@ -59,7 +63,15 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-const bot = new Telegraf(BOT_TOKEN);
+const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: TELEGRAM_HANDLER_TIMEOUT_MS });
+
+function backendFetchError(e) {
+  const n = e?.name || "";
+  if (n === "TimeoutError" || n === "AbortError") {
+    return { ok: false, data: { error: "⏱ 서버 응답 시간 초과. 잠시 후 다시 시도해 주세요. (Backend timeout)" } };
+  }
+  return { ok: false, data: { error: "Cannot connect to backend. Check if it's running. (ECONNREFUSED)" } };
+}
 
 async function callBackend(path, body) {
   if (!BACKEND_URL) return null;
@@ -69,11 +81,12 @@ async function callBackend(path, body) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(BACKEND_FETCH_TIMEOUT_MS),
     });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, data };
   } catch (e) {
-    return { ok: false, data: { error: "Cannot connect to backend. Check if it's running. (ECONNREFUSED)" } };
+    return backendFetchError(e);
   }
 }
 
@@ -81,10 +94,14 @@ async function callBackendGet(pathWithQuery) {
   if (!BACKEND_URL) return null;
   const url = `${BACKEND_URL.replace(/\/$/, "")}${pathWithQuery}`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(BACKEND_FETCH_TIMEOUT_MS) });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, data };
   } catch (e) {
+    const n = e?.name || "";
+    if (n === "TimeoutError" || n === "AbortError") {
+      return { ok: false, data: { error: "⏱ 서버 응답 시간 초과. 잠시 후 다시 시도해 주세요. (Backend timeout)" } };
+    }
     return { ok: false, data: {} };
   }
 }
