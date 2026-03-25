@@ -35,6 +35,7 @@ app.use((req, res, next) => {
 const PORT = Number(process.env.PORT) || 3000;
 const MOCK = process.env.MOCK_AZTEC !== undefined && process.env.MOCK_AZTEC !== "0";
 const USE_SECRET = process.env.SECRET_NETWORK === "1" && isSecretEnabled();
+const BUILD_ID = process.env.BUILD_ID || "2026-03-25_balancebudget_v2";
 /** /wallet/balance 체인 LCD 경로 전체 상한 — secret.mjs 최악(여러 LCD×permit 프로브)보다 짧으면 err=BUDGET·0 잔액으로 보임 */
 // Chain 조회가 너무 느릴 때라도 BUDGET에 의해 먼저 잘려 0으로 보이는 문제 방지
 // (Railway Variables 값이 있어도 무시)
@@ -98,10 +99,13 @@ app.get("/health", (req, res) => res.json({ ok: true, service: "snvr-backend" })
 // 체인 설정 (Keplr 연결용. 메인넷 배포 후 사용)
 app.get("/wallet/chain-config", (req, res) => {
   res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+  res.setHeader("X-Build-Id", BUILD_ID);
   try {
     const c = loadConfig();
     return res.json({
       ok: true,
+      build_id: BUILD_ID,
+      served_at: new Date().toISOString(),
       chain_id: c.chain_id || null,
       lcd_url: c.lcd_url || null,
       snvr_address: c.snvr_token || null,
@@ -113,6 +117,8 @@ app.get("/wallet/chain-config", (req, res) => {
   } catch (e) {
     return res.json({
       ok: true,
+      build_id: BUILD_ID,
+      served_at: new Date().toISOString(),
       chain_id: null,
       lcd_url: null,
       snvr_address: null,
