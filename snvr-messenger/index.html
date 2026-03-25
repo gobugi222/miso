@@ -1469,6 +1469,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
         return;
       }
+      // Snapshot creds at call time to avoid delayed UI overwrites with stale "memory=0".
+      const credsSnapshot = getCreds();
+      const wantsAuth = hasWalletAuthCreds(credsSnapshot);
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
       Promise.all([
         api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
@@ -1476,14 +1479,22 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       ]).then(function (results) {
         const profileR = results[0];
         const balanceR = results[1];
-        let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
-        const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
-        if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
-          if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
+        // If we still have a valid local permit/viewing key but backend returned source=memory (0),
+        // do not overwrite sidebar with that misleading value.
+        const src = String(balanceR?.data?.source || "");
+        if (wantsAuth && balanceR?.ok && (src === "memory" || src === "" || src === "memory_fallback")) {
+          // Still update debug, but avoid overwriting the visible sidebar number.
+          setBalanceDebug(balanceR, u);
         } else {
-          if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
+          let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
+          const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
+          if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
+            if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
+          } else {
+            if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
+          }
+          setBalanceDebug(balanceR, u);
         }
-        setBalanceDebug(balanceR, u);
         if (profileR.ok && profileR.data) {
           if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
           if (avatarEl) {
