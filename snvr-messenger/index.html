@@ -1406,12 +1406,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
                 );
                 if (r2 && r2.ok && r2.data) {
                   const src2 = String(r2.data.source || "");
-                  const bal2 = Number(r2.data.balance || 0);
-                  if (src2 === "chain" || bal2 > 0) {
+                  // Avoid overwriting with memory_fallback=0 after delay.
+                  if (src2 === "chain") {
                     if (b) b.textContent = r2.data.balance;
+                    setBalanceDebug(r2, u);
                   }
                 }
-                setBalanceDebug(r2 || r, u);
               } catch (_e) { /* ignore */ }
               finally { window.__snvr_balance_retry_inflight = false; }
             })();
