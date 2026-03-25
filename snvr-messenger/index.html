@@ -1162,8 +1162,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     /** 경로별 fetch 상한 — 응답 없이 무한 대기(로딩 멈춤) 방지 */
     function apiFetchTimeoutMs(path) {
       var p = String(path || "");
-      /** 백엔드 BALANCE_CHAIN_BUDGET_MS(기본 190s) + 여유 */
-      if (p.indexOf("/wallet/balance") === 0) return 205000;
+      /** 백엔드 BALANCE_CHAIN_BUDGET_MS(기본 260s) + 여유 */
+      if (p.indexOf("/wallet/balance") === 0) return 280000;
       if (p.indexOf("/wallet/link-secret") === 0) return 34000;
       if (p.indexOf("/wallet/bot-balance-sync") === 0) return 34000;
       return 45000;
