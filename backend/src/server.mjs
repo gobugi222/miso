@@ -91,6 +91,7 @@ app.get("/health", (req, res) => res.json({ ok: true, service: "snvr-backend" })
 
 // 체인 설정 (Keplr 연결용. 메인넷 배포 후 사용)
 app.get("/wallet/chain-config", (req, res) => {
+  res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
   try {
     const c = loadConfig();
     return res.json({
