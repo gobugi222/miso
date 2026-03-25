@@ -353,6 +353,15 @@ app.post("/wallet/balance", async (req, res) => {
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   const memBal = Number(u.balance || 0);
+  if (secret_address && rawPermit && !permit) {
+    return res.json({
+      ok: true,
+      balance: memBal,
+      source: "memory",
+      auth: "permit_rejected",
+      permit_debug: { ok: false, reason: "permit_expired_or_malformed" },
+    });
+  }
   // 1) permit 우선
   if (secret_address && permit) {
     let permitProbe = null;
@@ -367,6 +376,16 @@ app.post("/wallet/balance", async (req, res) => {
     } catch (e) {
       if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit_invalid", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
       throw e;
+    }
+    if (!viewing_key || !String(viewing_key).trim()) {
+      const probeOnFail = permitProbe ?? (await getSnvrBalanceWithPermitProbe(secret_address, permit));
+      return res.json({
+        ok: true,
+        balance: memBal,
+        source: "memory",
+        auth: "permit_chain_null",
+        permit_debug: probeOnFail,
+      });
     }
   }
   // 2) viewing key fallback
