@@ -391,61 +391,65 @@ app.post("/wallet/balance", async (req, res) => {
   const budgetMs = clampInt(req.body?.budget_ms ?? req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? 8000;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
-  const memBal = Number(u.balance || 0);
   const fbBal = getFallbackBalance(u);
   const chainLinked = Boolean(u.secret_address && u.permit);
+  const userKey = platformKey(platform, platform_user_id);
+  const hasCachedChain = Number.isFinite(Number(u.last_chain_balance)) && Number(u.last_chain_balance) >= 0 && Number(u.last_chain_at || 0) > 0;
+  const stale = !hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
+  const immediate = hasCachedChain ? Math.max(fbBal, Number(u.last_chain_balance)) : fbBal;
   // 1) permit 우선
   if (secret_address && permit) {
-    let permitProbe = null;
     if (debugPermit) {
       // Probe는 응답을 막지 않게 백그라운드로만 돌린다.
-      const userKey = platformKey(platform, platform_user_id);
       scheduleChainRefresh(userKey + "::probe", async () => {
         try { await withChainBudget(getSnvrBalanceWithPermitProbe(secret_address, permit), budgetMs); } catch (_e) {}
       });
     }
-    try {
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit), budgetMs);
-      if (chainBal != null) {
-        const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        saveDb();
-        if (human === 0 && fbBal > 0) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "permit", permit_debug: permitProbe || undefined });
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "permit", permit_debug: permitProbe || undefined });
-      }
-    } catch (e) {
-      if (isBalanceBudgetError(e)) {
-        return res.json({
-          ok: true,
-          chain_linked: chainLinked,
-          balance: fbBal,
-          source: "memory_fallback",
-          auth: "chain_slow",
-          permit_debug: { ok: false, error_code: "BUDGET" },
-          message: "chain_query_budget",
-        });
-      }
-      if (e?.message === "PERMIT_INVALID") {
-        return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "permit_invalid", permit_debug: { ok: false, error_code: "PERMIT_INVALID" } });
-      }
-      return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_error" });
+    let pending_chain = false;
+    if (stale) {
+      pending_chain = scheduleChainRefresh(userKey + "::post", async () => {
+        try {
+          const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit), budgetMs);
+          if (chainBal != null) {
+            const human = Number(chainBal) / 1e9;
+            rememberChainBalance(u, human);
+            saveDb();
+          }
+        } catch (_e) { /* ignore */ }
+      });
     }
+    return res.json({
+      ok: true,
+      chain_linked: true,
+      balance: immediate,
+      source: hasCachedChain ? "cached_chain" : "memory_fallback",
+      auth: hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
+      pending_chain,
+    });
   }
   // 2) 저장된 기존 링크(permit) fallback
   if (u.secret_address && u.permit) {
-    try {
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
-      if (chainBal != null) {
-        const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        saveDb();
-        if (human === 0 && fbBal > 0) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "stored_permit" });
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "stored_permit" });
-      }
-    } catch (e) {
-      if (isBalanceBudgetError(e)) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow", message: "chain_query_budget" });
-      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "stored_permit_invalid" });
+    let pending_chain = false;
+    if (stale) {
+      pending_chain = scheduleChainRefresh(userKey + "::stored", async () => {
+        try {
+          const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
+          if (chainBal != null) {
+            const human = Number(chainBal) / 1e9;
+            rememberChainBalance(u, human);
+            saveDb();
+          }
+        } catch (_e) { /* ignore */ }
+      });
     }
+    return res.json({
+      ok: true,
+      chain_linked: chainLinked,
+      balance: immediate,
+      source: hasCachedChain ? "cached_chain" : "memory_fallback",
+      auth: hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
+      pending_chain,
+    });
   }
   return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory" });
 });
