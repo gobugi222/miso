@@ -712,12 +712,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LAST_DASHBOARD_VIEW_KEY = "snvr_last_dashboard_view";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
-    // Backend이 /wallet/chain-config를 아직 못 주는 순간에도 사용자가 Keplr에 등록할 수 있게
-    // 프론트에 최소값(배포 고정값)을 기본값으로 박아 둔다.
-    const DEFAULT_CHAIN_ID = "secret-4";
-    const DEFAULT_SNVR_CONTRACT = "secret1d6qvapy96q94etwlnc7j33dlzmenz4j70w3ew7";
-    const DEFAULT_SNVR_CODE_HASH = "ff84f11b7639a1012126559dad4b41d5bf698b69657b09d7aea8483fe372c500";
-    const DEFAULT_SNVR_DECIMALS = 9;
 
     const I18N = {
       en: {
@@ -1159,45 +1153,20 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       return true;
     }
 
-    function isApiNetworkFailure(r) {
-      if (!r || r.ok) return false;
-      if (Number(r.status) === 0) return true;
-      var msg = String((r.data && r.data.error) || "").toLowerCase();
-      return msg.indexOf("cannot reach") >= 0 || msg.indexOf("failed to fetch") >= 0 || msg.indexOf("networkerror") >= 0 || msg.indexOf("load failed") >= 0;
-    }
-    /** 경로별 fetch 상한 — 응답 없이 무한 대기(로딩 멈춤) 방지 */
-    function apiFetchTimeoutMs(path) {
-      var p = String(path || "");
-      /** 백엔드 BALANCE_CHAIN_BUDGET_MS(기본 260s) + 여유 */
-      if (p.indexOf("/wallet/balance") === 0) return 280000;
-      if (p.indexOf("/wallet/link-secret") === 0) return 34000;
-      if (p.indexOf("/wallet/bot-balance-sync") === 0) return 34000;
-      return 45000;
-    }
-    /** Telegram WebView·Edge 일시 장애 대비: 재시도 + 매 시도마다 새 타임아웃 시그널 */
     async function api(path, body, method) {
       const url = getApiUrl() + path;
-      const opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
+      let opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
-      const timeoutMs = apiFetchTimeoutMs(path);
-      var lastErr = null;
-      for (var attempt = 0; attempt < 3; attempt++) {
-        try {
-          var fetchOpts = opt;
-          if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-            fetchOpts = Object.assign({}, opt, { signal: AbortSignal.timeout(timeoutMs) });
-          }
-          const res = await fetch(url, fetchOpts);
-          const text = await res.text();
-          var data = {};
-          try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
-          return { ok: res.ok, status: res.status, data };
-        } catch (e) {
-          lastErr = e;
-          if (attempt < 2) await new Promise(function (r) { setTimeout(r, 350 * (attempt + 1)); });
-        }
+      let res, text;
+      try {
+        res = await fetch(url, opt);
+        text = await res.text();
+      } catch (e) {
+        return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (e.message || "") + ")" } };
       }
-      return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (lastErr && lastErr.message ? lastErr.message : "") + ")" } };
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
+      return { ok: res.ok, status: res.status, data };
     }
     async function syncServerWalletLink(secretAddress, viewingKey, permit) {
       const u = getUser();
@@ -1286,16 +1255,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       if (name === "mix") { refreshMixPending(); }
       if (name === "settings") {
-        void (async function settingsHydrate() {
-          try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
-          try { await ensureServerPermitSync(); } catch (_e) { /* ignore */ }
-          loadProfileForm();
-          loadViewingKey();
-          loadWalletSnvrInfo();
-          refreshWalletLinkStatusUi();
-          await loadBotBalanceSync();
-          void refreshProfileSidebar();
-        })();
+        loadProfileForm();
+        loadViewingKey();
+        loadWalletSnvrInfo();
+        refreshWalletLinkStatusUi();
+        loadBotBalanceSync();
       }
     }
     function showScreen(login) {
@@ -1352,12 +1316,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function fetchWalletBalanceForUi(u) {
       const c = getCreds();
       if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
-      let r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+      // chain 조회가 느려도 UI가 멈추지 않게 backend 예산(budget_ms) 강제
+      var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
+      rBody.budget_ms = 8000;
+      let r = await api("/wallet/balance", rBody);
       let hadAuthFallback = false;
       if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
         // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
-        r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+        var rBody2 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
+        rBody2.budget_ms = 8000;
+        r = await api("/wallet/balance", rBody2);
         if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
           hadAuthFallback = true;
           r = await fetchWalletBalanceServerOnly(u);
@@ -1374,11 +1343,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       // Self-heal: if still memory source while local permit exists, force server re-link once.
       if (r.ok && String(r.data?.source || "") === "memory") {
         const c2 = getCreds();
-        if (c2?.secret_address && isPermitSessionValid(c2?.permit)) {
+        const botToggle = document.getElementById("botBalanceSyncToggle");
+        const botSyncWants = !!(botToggle && botToggle.checked);
+        // Privacy: 사용자가 bot-sync를 OFF로 두면 서버 저장/동기화 자동 수행하지 않음.
+        if (botSyncWants && c2?.secret_address && isPermitSessionValid(c2?.permit)) {
           try {
             await syncServerWalletLink(c2.secret_address, "", c2.permit);
             await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
-            const retry = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
+            var rBody3 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
+            rBody3.budget_ms = 8000;
+            const retry = await api("/wallet/balance", rBody3);
             if (retry?.ok) r = retry;
           } catch (_e) { /* ignore */ }
         }
@@ -1396,11 +1370,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
     async function fetchWalletBalanceServerOnly(u) {
       const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
-        "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
+        "&platform_user_id=" + encodeURIComponent(u.platform_user_id) + "&budget_ms=8000";
       return api(q);
     }
     async function fetchWalletBalanceWithFallback(u) {
       const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
+      primaryBody.budget_ms = 8000;
       let r = await api("/wallet/balance", primaryBody);
       const authErr = r && !r.ok && (r.data?.error === "viewing_key_invalid" || r.data?.error === "permit_invalid");
       if (!authErr) return r;
@@ -1408,7 +1383,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const c = getCreds();
       if (c?.secret_address) setCreds(c.secret_address, "", null);
       else clearCreds();
-      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 8000 });
     }
     function setBalanceDebug(resp, u) {
       const el = document.getElementById("balanceDebug");
@@ -1421,17 +1396,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const addr = String(c.secret_address || "").trim();
       const shortAddr = addr ? maskSecretAddress(addr) : "-";
       const hasPermit = isPermitSessionValid(c.permit) ? "yes" : "no";
-      const pd = resp?.data?.permit_debug;
-      const pdHint = pd && typeof pd === "object" && pd.ok === false
-        ? (" | err=" + String(pd.error_code || pd.reason || "") + (Array.isArray(pd.errors) && pd.errors[0] ? (": " + String(pd.errors[0]).slice(0, 120)) : ""))
-        : "";
-      const apiBase = getApiUrl();
-      const failHint = resp && resp.ok === false
-        ? (" | HTTP=" + String(resp.status || 0) + " " + String(resp.data?.error || resp.data?.message || "").slice(0, 100) + " api=" + apiBase.slice(0, 48) +
-          (isApiNetworkFailure(resp) ? " | Keplr OK ≠ API OK" : ""))
-        : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + pdHint + failHint;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit;
     }
 
     function profileAvatarUrl() {
@@ -1453,54 +1419,41 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return;
       }
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
-      api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id))
-        .then(function (profileR) {
-          if (profileR.ok && profileR.data) {
-            if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
-            if (avatarEl) {
-              if (profileR.data.has_avatar) {
-                avatarEl.src = profileAvatarUrl();
-                avatarEl.onerror = function () { this.onerror = null; this.src = "snvr-messenger-logo.png?v=3"; };
-              } else {
-                avatarEl.src = "snvr-messenger-logo.png?v=3";
-                avatarEl.onerror = null;
-              }
-            }
-            return String(profileR.data.status_text || "").trim();
-          }
-          if (nameEl) nameEl.textContent = "SNVR Messenger";
-          if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
-          return "";
-        })
-        .then(function (statusText) {
-          return fetchWalletBalanceForUi(u).then(function (balanceR) {
-            const balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
-            if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
-              if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
-            } else if (!balanceR.ok) {
-              if (balanceEl) {
-                balanceEl.textContent = isApiNetworkFailure(balanceR)
-                  ? "API 서버 연결 실패 — 지갑(Keplr)은 됐어도 api.snvr.org 통신이 안 됨. Telegram 밖 브라우저에서 app.snvr.org 열기·VPN/필터 끄기·잠시 후 재시도"
-                  : "잔액 조회 실패 — 잠시 후 다시 시도";
-                balanceEl.style.color = "#f85149";
-              }
-            } else if (balanceR.data?.auth === "chain_slow" || balanceR.data?.message === "chain_query_budget") {
-              if (balanceEl) {
-                balanceEl.textContent = "체인 지연 — Balance " + balance + " SNVR (앱 메모리)" + (statusText ? " · " + statusText : "");
-                balanceEl.style.color = "#d29922";
-              }
+      Promise.all([
+        api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
+        fetchWalletBalanceForUi(u),
+      ]).then(function (results) {
+        const profileR = results[0];
+        const balanceR = results[1];
+        let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
+        const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
+        if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
+          if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
+        } else {
+          if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
+        }
+        setBalanceDebug(balanceR, u);
+        if (profileR.ok && profileR.data) {
+          if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
+          if (avatarEl) {
+            if (profileR.data.has_avatar) {
+              avatarEl.src = profileAvatarUrl();
+              avatarEl.onerror = function () { this.onerror = null; this.src = "snvr-messenger-logo.png?v=3"; };
             } else {
-              if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
+              avatarEl.src = "snvr-messenger-logo.png?v=3";
+              avatarEl.onerror = null;
             }
-            setBalanceDebug(balanceR, u);
-          });
-        })
-        .catch(function () {
+          }
+        } else {
           if (nameEl) nameEl.textContent = "SNVR Messenger";
           if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
-          if (balanceEl) balanceEl.textContent = "";
-          setBalanceDebug({ ok: false, data: { source: "error", auth: "error", balance: "?" } }, u);
-        });
+        }
+      }).catch(function () {
+        if (nameEl) nameEl.textContent = "SNVR Messenger";
+        if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
+        if (balanceEl) balanceEl.textContent = "";
+        setBalanceDebug({ ok: false, data: { source: "error", auth: "error", balance: "?" } }, u);
+      });
     }
     async function loadProfileForm() {
       const u = getUser();
@@ -1555,16 +1508,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var d = r.data || {};
       var addr = d.snvr_address || null;
       var hash = d.snvr_code_hash || null;
-      var dec = Number(d.snvr_decimals != null ? d.snvr_decimals : DEFAULT_SNVR_DECIMALS);
+      var dec = Number(d.snvr_decimals != null ? d.snvr_decimals : 9);
       if (!Number.isFinite(dec) || dec < 0) dec = 9;
-      // 백엔드가 아직 값(null)을 주는 상태에서도 사용자가 진행할 수 있게 fallback 주입
-      if (!addr) addr = DEFAULT_SNVR_CONTRACT;
-      if (!hash) hash = DEFAULT_SNVR_CODE_HASH;
-      if (d.chain_id) {
-        // backend 값이 있으면 그대로 사용
-      } else {
-        d.chain_id = DEFAULT_CHAIN_ID;
-      }
       contractEl.value = addr || "";
       hashEl.value = hash || "";
       contractEl.placeholder = addr ? "" : "(none)";
@@ -1785,21 +1730,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       setKeplrFlowStatus("connecting");
       try {
         const cfg = await api("/wallet/chain-config");
-        // backend 응답이 아직 null일 때도 Keplr 연결을 막지 않도록, 입력칸/기본값으로 fallback한다.
-        var walletContractEl = document.getElementById("walletSnvrContract");
-        var walletHashEl = document.getElementById("walletSnvrCodeHash");
-        var backendChainId = cfg?.data?.chain_id;
-        var chainId = backendChainId || DEFAULT_CHAIN_ID;
-        var snvrAddr =
-          cfg?.data?.snvr_address ||
-          (walletContractEl ? walletContractEl.value : "") ||
-          DEFAULT_SNVR_CONTRACT;
-        var codeHash =
-          cfg?.data?.snvr_code_hash ||
-          (walletHashEl ? walletHashEl.value : "") ||
-          DEFAULT_SNVR_CODE_HASH;
-        if (!cfg.ok && (!chainId || !snvrAddr || !codeHash)) {
-          statusEl.textContent = "SNVR token config missing. Try refresh login or check API URL.";
+        if (!cfg.ok || !cfg.data.snvr_address || !cfg.data.chain_id) {
+          statusEl.textContent = "SNVR not deployed yet. Use after mainnet deployment.";
           statusEl.className = "error";
           return;
         }
@@ -1815,7 +1747,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           } catch (_e) { /* ignore */ }
           return;
         }
-        const lcdUrl = cfg?.data?.lcd_url || cfg?.lcd_url || "https://lcd.secret.express";
+        const chainId = cfg.data.chain_id;
+        const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
+        const snvrAddr = cfg.data.snvr_address;
+        const codeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
         statusEl.textContent = "Requesting wallet access...";
         await withTimeout(keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT");
         const signer = keplr.getOfflineSigner(chainId);
@@ -1862,49 +1797,50 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           statusEl.className = "error";
           setKeplrFlowStatus("error_no_auth");
           return;
+        } else {
+          setCreds(secretAddress, "", permit);
+          if (permit) {
+            const botToggle = document.getElementById("botBalanceSyncToggle");
+            const botSyncWants = !!(botToggle && botToggle.checked);
+            // Privacy: bot-sync 토글이 OFF면 서버 저장/동기화를 자동으로 하지 않는다.
+            if (botSyncWants) {
+              let linkR = await syncServerWalletLink(secretAddress, "", permit);
+              if (!linkR.ok && !linkR.skipped) {
+                linkR = await syncServerWalletLink(secretAddress, "", permit);
+              }
+              if (!linkR.ok && !linkR.skipped) {
+                statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
+                statusEl.className = "error";
+                setKeplrFlowStatus("error_server_link_sync");
+                return;
+              }
+              // Verify server side really has wallet auth after connect.
+              const verifyR = await api(
+                "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
+                "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
+              );
+              if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
+                // One more forced sync before continuing.
+                await syncServerWalletLink(secretAddress, "", permit);
+                await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+              }
+            }
+          }
+          statusEl.textContent = "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready)";
+          statusEl.className = "success";
+          setKeplrFlowStatus("connected");
         }
-        setCreds(secretAddress, "", permit);
-        statusEl.textContent =
-          "✅ 지갑 연결 완료 (이 기기에 저장됨). 서버(api) 동기화·잔액 조회는 뒤에서 진행됩니다.";
-        statusEl.className = "success";
-        setKeplrFlowStatus("connected");
         if (isTelegramInAppBrowser()) {
-          statusEl.textContent += " (mini app은 보통 나갔다 와도 유지; 초기화되면 다시 Connect)";
+          statusEl.textContent += "  You can return to Telegram now.";
         }
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        void refreshProfileSidebar();
+        const botToggle2 = document.getElementById("botBalanceSyncToggle");
+        const botSyncWants2 = !!(botToggle2 && botToggle2.checked);
+        if (permit && botSyncWants2) await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+        refreshProfileSidebar();
         tryAutoReturnAfterConnect();
-        void (async function keplrServerFollowup() {
-          var st = document.getElementById("keplrStatus");
-          try {
-            var linkR = await syncServerWalletLink(secretAddress, "", permit);
-            if (!linkR.ok && !linkR.skipped) linkR = await syncServerWalletLink(secretAddress, "", permit);
-            var verifyR = await api(
-              "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
-              "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
-            );
-            if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
-              await syncServerWalletLink(secretAddress, "", permit);
-              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
-            } else {
-              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
-            }
-            if (st && linkR && !linkR.ok && !linkR.skipped) {
-              st.textContent =
-                "✅ 이 기기 지갑은 연결됨. 서버(api.snvr.org)에 주소 저장이 실패했을 수 있음 — 네트워크 확인 후 [Connect Keplr] 한 번 더.";
-              st.className = "error";
-            }
-          } catch (_e) {
-            if (st) {
-              st.textContent =
-                "✅ 이 기기 지갑은 연결됨. 서버 맞춤 중 오류 — 잠시 뒤 설정에서 [Connect Keplr] 재시도.";
-              st.className = "search-hint";
-            }
-          }
-          void refreshProfileSidebar();
-        })();
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
         statusEl.className = "error";
@@ -2744,18 +2680,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const addr = String(r.data?.secret_address || c.secret_address || "").trim();
         const permit = r.data?.permit || c.permit || null;
         if (addr && permit) setCreds(addr, "", permit);
-        // If user already has permit session, turn bot sync ON automatically (no manual checkbox tap).
-        if (addr && permit && !r.data?.enabled) {
-          const autoOnR = await api("/wallet/bot-balance-sync", {
-            platform: u.platform,
-            platform_user_id: u.platform_user_id,
-            enabled: true,
-            secret_address: addr,
-            viewing_key: "",
-            permit: permit,
-          });
-          if (autoOnR.ok) toggle.checked = true;
-        }
+        // Privacy: 사용자가 OFF로 둔 상태면 절대 자동으로 bot-sync를 켜지지 않게 한다.
       } catch (_e) { /* ignore */ }
       status.className = "search-hint";
       status.textContent = (r.data.enabled || r.data.has_secret_link)
@@ -2870,10 +2795,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         hint.textContent = "Keplr opening... After approving in Keplr, return here and tap 'I approved in Keplr' if auto-connect does not start.";
       }
       try {
-        var pop = window.open(link, "_blank", "noopener,noreferrer");
-        if (!pop || pop.closed) window.location.href = link;
+        window.location.href = link;
       } catch (_e) {
-        try { window.location.href = link; } catch (_e2) { /* ignore */ }
+        /* ignore */
       }
       setTimeout(function () {
         if (hint) {
