@@ -18,9 +18,11 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_SEARCH_MODEL = process.env.GEMINI_SEARCH_MODEL || "gemini-1.5-flash";
 const SEARCH_RESULTS_MAX = 7;
 const AD_STATE_PATH = join(process.cwd(), "data", "ad-state.json");
-/** 백엔드 fetch 상한. 체인 LCD가 느리면 봇이 Telegraf 90초 한도에 걸리지 않게 먼저 끊음 */
-const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.BACKEND_FETCH_TIMEOUT_MS) || 60000;
-/** Telegraf 기본 90초 초과 방지 — 백엔드 LCD 재시도 시 필요 */
+/** 일반 POST/GET (채팅 검색 등) */
+const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.BACKEND_FETCH_TIMEOUT_MS) || 90000;
+/** /wallet/balance 만 체인 LCD 재시도로 오래 걸릴 수 있음 — 봇이 60초에 끊으면 사용자만 타임아웃 당함 */
+const BALANCE_FETCH_TIMEOUT_MS = Number(process.env.BALANCE_FETCH_TIMEOUT_MS) || 180000;
+/** Telegraf 핸들러 한도 — balance 대기 시간보다 커야 함 */
 const TELEGRAM_HANDLER_TIMEOUT_MS = Number(process.env.TELEGRAM_HANDLER_TIMEOUT_MS) || 240000;
 
 const USER_LANG = new Map(); // userId -> "en" | "ko" | "ja"
@@ -90,11 +92,12 @@ async function callBackend(path, body) {
   }
 }
 
-async function callBackendGet(pathWithQuery) {
+async function callBackendGet(pathWithQuery, timeoutMs) {
   if (!BACKEND_URL) return null;
   const url = `${BACKEND_URL.replace(/\/$/, "")}${pathWithQuery}`;
+  const ms = timeoutMs != null && Number(timeoutMs) > 0 ? Number(timeoutMs) : BACKEND_FETCH_TIMEOUT_MS;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(BACKEND_FETCH_TIMEOUT_MS) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(ms) });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, data };
   } catch (e) {
@@ -602,7 +605,10 @@ bot.command("balance", async (ctx) => {
   const m = WALLET_MSG[getLang(ctx)] || WALLET_MSG.en;
   if (!BACKEND_URL) return ctx.reply(m.noBackend);
   const userId = getUserId(ctx);
-  const res = await callBackendGet(`/wallet/balance?platform=telegram&platform_user_id=${encodeURIComponent(userId)}&locale=${getLang(ctx)}`);
+  const res = await callBackendGet(
+    `/wallet/balance?platform=telegram&platform_user_id=${encodeURIComponent(userId)}&locale=${getLang(ctx)}`,
+    BALANCE_FETCH_TIMEOUT_MS
+  );
   if (!res?.ok) return ctx.reply(res?.data?.error || m.balanceFail);
   return ctx.reply(m.balance(res.data.balance));
 });
