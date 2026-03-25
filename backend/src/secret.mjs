@@ -15,6 +15,35 @@ let txClient = null;
 
 const DECIMALS = 9;
 
+/** mainnet 조회용: 한 LCD가 HTML/502/invalid json을 줄 때 순서대로 재시도 */
+function getLcdCandidates() {
+  loadConfig();
+  const primary = String(process.env.LCD_URL || config.lcd_url || "http://localhost:1317").replace(/\/$/, "");
+  const fromEnv = (process.env.LCD_URL_FALLBACKS || "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  const chain = String(config.chain_id || "");
+  const isMainnet = chain === "secret-4" || chain.includes("secret-4");
+  const baked = isMainnet
+    ? ["https://lcd.secret.express", "https://rest.lavenderfive.com/secretnetwork"]
+    : [];
+  const out = [];
+  const seen = new Set();
+  for (const u of [primary, ...fromEnv, ...baked]) {
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
+function forceLcdUrl(url) {
+  loadConfig();
+  config.lcd_url = String(url).replace(/\/$/, "");
+  queryClient = null;
+}
+
 function loadConfig() {
   if (config) return config;
   const paths = [
@@ -86,23 +115,28 @@ function getTxClient() {
 export async function getSnvrBalance(address, viewingKey) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return null;
-  try {
-    const client = getQueryClient();
-    const result = await client.query.snip20.getBalance({
-      contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
-      address: String(address).trim(),
-      auth: { key: String(viewingKey).trim() },
-    });
-    const amount = result?.balance?.amount ?? "0";
-    return amount;
-  } catch (e) {
-    console.warn("getSnvrBalance error:", e?.message);
-    const msg = String(e?.message || "");
-    if (msg.includes("viewing_key") || msg.includes("Wrong viewing key") || msg.includes("viewing key")) {
-      throw new Error("VIEWING_KEY_INVALID");
+  const urls = getLcdCandidates();
+  let lastMsg = "";
+  for (const url of urls) {
+    forceLcdUrl(url);
+    try {
+      const client = getQueryClient();
+      const result = await client.query.snip20.getBalance({
+        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+        address: String(address).trim(),
+        auth: { key: String(viewingKey).trim() },
+      });
+      const amount = result?.balance?.amount ?? "0";
+      return amount;
+    } catch (e) {
+      lastMsg = String(e?.message || "");
+      console.warn("getSnvrBalance error (" + url + "):", lastMsg);
+      if (lastMsg.includes("viewing_key") || lastMsg.includes("Wrong viewing key") || lastMsg.includes("viewing key")) {
+        throw new Error("VIEWING_KEY_INVALID");
+      }
     }
-    return null;
   }
+  return null;
 }
 
 /** SNIP-20 잔액 조회 (address + permit) */
@@ -113,85 +147,93 @@ export async function getSnvrBalanceWithPermit(address, permit) {
   return null;
 }
 
+async function getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c) {
+  const client = getQueryClient();
+  const target = String(address).trim();
+  const candidates = [];
+  const errors = [];
+  const pickAmount = (v) => {
+    if (v == null) return;
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) candidates.push(Math.floor(n));
+  };
+
+  try {
+    const r1 = await client.query.snip20.getBalance({
+      contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+      address: target,
+      auth: { permit },
+    });
+    pickAmount(r1?.balance?.amount);
+  } catch (_e1) {
+    errors.push("path1:" + String(_e1?.message || "unknown"));
+  }
+
+  try {
+    const r2 = await client.query.compute.queryContract({
+      contract_address: c.snvr_token,
+      code_hash: c.snvr_code_hash,
+      query: {
+        with_permit: {
+          permit,
+          query: { balance: { address: target } },
+        },
+      },
+    });
+    pickAmount(r2?.balance?.amount);
+  } catch (_e2) {
+    errors.push("path2:" + String(_e2?.message || "unknown"));
+  }
+
+  try {
+    const r3 = await client.query.compute.queryContract({
+      contract_address: c.snvr_token,
+      code_hash: c.snvr_code_hash,
+      query: {
+        with_permit: {
+          permit,
+          query: { balance: {} },
+        },
+      },
+    });
+    pickAmount(r3?.balance?.amount);
+  } catch (_e3) {
+    errors.push("path3:" + String(_e3?.message || "unknown"));
+  }
+
+  if (!candidates.length) {
+    const combined = errors.join(" | ").toLowerCase();
+    if (combined.includes("permit") || combined.includes("signature") || combined.includes("permission")) {
+      return { ok: false, error_code: "PERMIT_INVALID", errors };
+    }
+    return { ok: false, error_code: "QUERY_FAILED", errors };
+  }
+  return { ok: true, amount: String(Math.max(...candidates)), errors };
+}
+
 /** Permit 조회 진단용: 어떤 경로에서 실패했는지 상세 반환 */
 export async function getSnvrBalanceWithPermitProbe(address, permit) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return { ok: false, error_code: "CONFIG_MISSING", errors: [] };
   if (!permit || typeof permit !== "object") return { ok: false, error_code: "PERMIT_MISSING", errors: [] };
-  try {
-    const client = getQueryClient();
-    const target = String(address).trim();
-    const candidates = [];
-    const errors = [];
-    const pickAmount = (v) => {
-      if (v == null) return;
-      const n = Number(v);
-      if (Number.isFinite(n) && n >= 0) candidates.push(Math.floor(n));
-    };
-
-    // Path 1: secretjs SNIP-20 helper
+  const urls = getLcdCandidates();
+  let last = { ok: false, error_code: "QUERY_FAILED", errors: [] };
+  for (const url of urls) {
+    forceLcdUrl(url);
     try {
-      const r1 = await client.query.snip20.getBalance({
-        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
-        address: target,
-        auth: { permit },
-      });
-      const a1 = r1?.balance?.amount;
-      pickAmount(a1);
-    } catch (_e1) {
-      errors.push("path1:" + String(_e1?.message || "unknown"));
+      const once = await getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c);
+      if (once.ok) return { ...once, lcd_used: url };
+      if (once.error_code === "PERMIT_INVALID") return once;
+      last = { ...once, lcd_tried: url };
+    } catch (e) {
+      const msg = String(e?.message || "");
+      const low = msg.toLowerCase();
+      const code = (low.includes("permit") || low.includes("signature") || low.includes("permission")) ? "PERMIT_INVALID" : "QUERY_FAILED";
+      last = { ok: false, error_code: code, errors: ["fatal:" + msg], lcd_tried: url };
+      if (code === "PERMIT_INVALID") return last;
     }
-
-    // Path 2: raw with_permit + balance{address}
-    try {
-      const r2 = await client.query.compute.queryContract({
-        contract_address: c.snvr_token,
-        code_hash: c.snvr_code_hash,
-        query: {
-          with_permit: {
-            permit,
-            query: { balance: { address: target } },
-          },
-        },
-      });
-      const a2 = r2?.balance?.amount;
-      pickAmount(a2);
-    } catch (_e2) {
-      errors.push("path2:" + String(_e2?.message || "unknown"));
-    }
-
-    // Path 3: raw with_permit + balance{} (owner implied by permit signer)
-    try {
-      const r3 = await client.query.compute.queryContract({
-        contract_address: c.snvr_token,
-        code_hash: c.snvr_code_hash,
-        query: {
-          with_permit: {
-            permit,
-            query: { balance: {} },
-          },
-        },
-      });
-      const a3 = r3?.balance?.amount;
-      pickAmount(a3);
-    } catch (_e3) {
-      errors.push("path3:" + String(_e3?.message || "unknown"));
-    }
-
-    if (!candidates.length) {
-      const combined = errors.join(" | ").toLowerCase();
-      if (combined.includes("permit") || combined.includes("signature") || combined.includes("permission")) {
-        return { ok: false, error_code: "PERMIT_INVALID", errors };
-      }
-      return { ok: false, error_code: "QUERY_FAILED", errors };
-    }
-    return { ok: true, amount: String(Math.max(...candidates)), errors };
-  } catch (e) {
-    const msg = String(e?.message || "");
-    const low = msg.toLowerCase();
-    const code = (low.includes("permit") || low.includes("signature") || low.includes("permission")) ? "PERMIT_INVALID" : "QUERY_FAILED";
-    return { ok: false, error_code: code, errors: ["fatal:" + msg] };
   }
+  return last;
 }
 
 /** SNVR 전송 (백엔드 지갑에서) */
