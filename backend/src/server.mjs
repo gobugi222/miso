@@ -36,10 +36,9 @@ const PORT = Number(process.env.PORT) || 3000;
 const MOCK = process.env.MOCK_AZTEC !== undefined && process.env.MOCK_AZTEC !== "0";
 const USE_SECRET = process.env.SECRET_NETWORK === "1" && isSecretEnabled();
 /** /wallet/balance 체인 LCD 경로 전체 상한 — secret.mjs 최악(여러 LCD×permit 프로브)보다 짧으면 err=BUDGET·0 잔액으로 보임 */
-const BALANCE_CHAIN_BUDGET_MS = Math.max(
-  20000,
-  Math.min(300000, Number(process.env.BALANCE_CHAIN_BUDGET_MS) || 260000)
-);
+// Chain 조회가 너무 느릴 때라도 BUDGET에 의해 먼저 잘려 0으로 보이는 문제 방지
+// (Railway Variables 값이 있어도 무시)
+const BALANCE_CHAIN_BUDGET_MS = 260000;
 function withChainBudget(promise) {
   return Promise.race([
     promise,
