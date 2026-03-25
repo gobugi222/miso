@@ -1019,7 +1019,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
     }
     const API_TIMEOUT_MS = Number(localStorage.getItem("snvr_api_timeout_ms") || "20000");
-    const API_BALANCE_TIMEOUT_MS = Number(localStorage.getItem("snvr_api_balance_timeout_ms") || "45000");
+    /** 백엔드 BALANCE_CHAIN_BUDGET_MS(기본 110s) + 여유 — 짧으면 체인 응답 전 브라우저가 먼저 끊김 */
+    const API_BALANCE_TIMEOUT_MS = Number(localStorage.getItem("snvr_api_balance_timeout_ms") || "130000");
     function tryAutoReturnAfterConnect() {
       var hint = document.getElementById("keplrOpenHint");
       if (hint) {
@@ -1456,7 +1457,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
               if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
             } else if (!balanceR.ok) {
-              if (balanceEl) { balanceEl.textContent = "Balance loading timeout — tap again."; balanceEl.style.color = "#f85149"; }
+              if (balanceEl) { balanceEl.textContent = "잔액 조회 시간 초과 — 다시 시도"; balanceEl.style.color = "#f85149"; }
+            } else if (balanceR.data?.auth === "chain_slow" || balanceR.data?.message === "chain_query_budget") {
+              if (balanceEl) {
+                balanceEl.textContent = "체인 지연 — Balance " + balance + " SNVR (앱 메모리)" + (statusText ? " · " + statusText : "");
+                balanceEl.style.color = "#d29922";
+              }
             } else {
               if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
             }
