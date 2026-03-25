@@ -1018,6 +1018,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (timer) clearTimeout(timer);
       }
     }
+    const API_TIMEOUT_MS = Number(localStorage.getItem("snvr_api_timeout_ms") || "20000");
+    const API_BALANCE_TIMEOUT_MS = Number(localStorage.getItem("snvr_api_balance_timeout_ms") || "45000");
     function tryAutoReturnAfterConnect() {
       var hint = document.getElementById("keplrOpenHint");
       if (hint) {
@@ -1158,11 +1160,24 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       let opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
       let res, text;
+      const timeoutMs = String(path || "").indexOf("/wallet/balance") === 0 ? API_BALANCE_TIMEOUT_MS : API_TIMEOUT_MS;
       try {
-        res = await fetch(url, opt);
-        text = await res.text();
+        const controller = new AbortController();
+        const timer = setTimeout(function () {
+          try { controller.abort(); } catch (_e) { /* ignore */ }
+        }, timeoutMs);
+        try {
+          res = await fetch(url, Object.assign({}, opt, { signal: controller.signal }));
+          text = await withTimeout(res.text(), Math.max(5000, timeoutMs), "RESPONSE_BODY_TIMEOUT");
+        } finally {
+          clearTimeout(timer);
+        }
       } catch (e) {
-        return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (e.message || "") + ")" } };
+        const msg = String(e?.message || "");
+        if (msg.includes("AbortError") || msg.includes("aborted") || msg.includes("TIMEOUT")) {
+          return { ok: false, status: 0, data: { error: "Server timeout (" + timeoutMs + "ms). Try again. If repeated, reconnect Keplr and check backend logs." } };
+        }
+        return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + msg + ")" } };
       }
       let data = {};
       try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
@@ -1416,41 +1431,44 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return;
       }
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
-      Promise.all([
-        api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
-        fetchWalletBalanceForUi(u),
-      ]).then(function (results) {
-        const profileR = results[0];
-        const balanceR = results[1];
-        let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
-        const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
-        if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
-          if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
-        } else {
-          if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
-        }
-        setBalanceDebug(balanceR, u);
-        if (profileR.ok && profileR.data) {
-          if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
-          if (avatarEl) {
-            if (profileR.data.has_avatar) {
-              avatarEl.src = profileAvatarUrl();
-              avatarEl.onerror = function () { this.onerror = null; this.src = "snvr-messenger-logo.png?v=3"; };
-            } else {
-              avatarEl.src = "snvr-messenger-logo.png?v=3";
-              avatarEl.onerror = null;
+      api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id))
+        .then(function (profileR) {
+          if (profileR.ok && profileR.data) {
+            if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
+            if (avatarEl) {
+              if (profileR.data.has_avatar) {
+                avatarEl.src = profileAvatarUrl();
+                avatarEl.onerror = function () { this.onerror = null; this.src = "snvr-messenger-logo.png?v=3"; };
+              } else {
+                avatarEl.src = "snvr-messenger-logo.png?v=3";
+                avatarEl.onerror = null;
+              }
             }
+            return String(profileR.data.status_text || "").trim();
           }
-        } else {
           if (nameEl) nameEl.textContent = "SNVR Messenger";
           if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
-        }
-      }).catch(function () {
-        if (nameEl) nameEl.textContent = "SNVR Messenger";
-        if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
-        if (balanceEl) balanceEl.textContent = "";
-        setBalanceDebug({ ok: false, data: { source: "error", auth: "error", balance: "?" } }, u);
-      });
+          return "";
+        })
+        .then(function (statusText) {
+          return fetchWalletBalanceForUi(u).then(function (balanceR) {
+            const balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
+            if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
+              if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
+            } else if (!balanceR.ok) {
+              if (balanceEl) { balanceEl.textContent = "Balance loading timeout — tap again."; balanceEl.style.color = "#f85149"; }
+            } else {
+              if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
+            }
+            setBalanceDebug(balanceR, u);
+          });
+        })
+        .catch(function () {
+          if (nameEl) nameEl.textContent = "SNVR Messenger";
+          if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
+          if (balanceEl) balanceEl.textContent = "";
+          setBalanceDebug({ ok: false, data: { source: "error", auth: "error", balance: "?" } }, u);
+        });
     }
     async function loadProfileForm() {
       const u = getUser();
