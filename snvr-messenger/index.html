@@ -1785,8 +1785,21 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       setKeplrFlowStatus("connecting");
       try {
         const cfg = await api("/wallet/chain-config");
-        if (!cfg.ok || !cfg.data.snvr_address || !cfg.data.chain_id) {
-          statusEl.textContent = "SNVR not deployed yet. Use after mainnet deployment.";
+        // backend 응답이 아직 null일 때도 Keplr 연결을 막지 않도록, 입력칸/기본값으로 fallback한다.
+        var walletContractEl = document.getElementById("walletSnvrContract");
+        var walletHashEl = document.getElementById("walletSnvrCodeHash");
+        var backendChainId = cfg?.data?.chain_id;
+        var chainId = backendChainId || DEFAULT_CHAIN_ID;
+        var snvrAddr =
+          cfg?.data?.snvr_address ||
+          (walletContractEl ? walletContractEl.value : "") ||
+          DEFAULT_SNVR_CONTRACT;
+        var codeHash =
+          cfg?.data?.snvr_code_hash ||
+          (walletHashEl ? walletHashEl.value : "") ||
+          DEFAULT_SNVR_CODE_HASH;
+        if (!cfg.ok && (!chainId || !snvrAddr || !codeHash)) {
+          statusEl.textContent = "SNVR token config missing. Try refresh login or check API URL.";
           statusEl.className = "error";
           return;
         }
@@ -1802,10 +1815,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           } catch (_e) { /* ignore */ }
           return;
         }
-        const chainId = cfg.data.chain_id;
-        const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
-        const snvrAddr = cfg.data.snvr_address;
-        const codeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
+        const lcdUrl = cfg?.data?.lcd_url || cfg?.lcd_url || "https://lcd.secret.express";
         statusEl.textContent = "Requesting wallet access...";
         await withTimeout(keplr.enable(chainId), 15000, "KEPLR_ENABLE_TIMEOUT");
         const signer = keplr.getOfflineSigner(chainId);
