@@ -1390,8 +1390,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!snvrAddr || !snvrCodeHash) return null;
 
       const SecretNetworkClient = await loadSecretJsClientCtor();
-      // Query-only client (no wallet needed). Permit/viewing-key auth happens in the query payload.
-      const client = new SecretNetworkClient({ url: lcdUrl, chainId });
+      // Secret Network queries also require encryption utils. Use Keplr's Enigma utils.
+      const keplr = window.keplr;
+      if (!keplr || !keplr.getEnigmaUtils) return null;
+      try { await withTimeout(keplr.enable(chainId), 12000, "KEPLR_ENABLE_FOR_QUERY_TIMEOUT"); } catch (_eEnable) { /* ignore */ }
+      const enigmaUtils = keplr.getEnigmaUtils(chainId);
+      // Query-only client (no signing). Permit/viewing-key auth happens in the query payload.
+      const client = new SecretNetworkClient({ url: lcdUrl, chainId, encryptionUtils: enigmaUtils });
 
       const doQuery = async function () {
         if (isPermitSessionValid(c.permit)) {
