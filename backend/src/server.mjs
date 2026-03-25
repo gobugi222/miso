@@ -39,13 +39,19 @@ const USE_SECRET = process.env.SECRET_NETWORK === "1" && isSecretEnabled();
 // Chain 조회가 너무 느릴 때라도 BUDGET에 의해 먼저 잘려 0으로 보이는 문제 방지
 // (Railway Variables 값이 있어도 무시)
 const BALANCE_CHAIN_BUDGET_MS = 260000;
-function withChainBudget(promise) {
+function clampInt(n, min, max) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return null;
+  return Math.max(min, Math.min(max, Math.trunc(x)));
+}
+function withChainBudget(promise, budgetMs = BALANCE_CHAIN_BUDGET_MS) {
+  const ms = clampInt(budgetMs, 5000, BALANCE_CHAIN_BUDGET_MS) ?? BALANCE_CHAIN_BUDGET_MS;
   return Promise.race([
     promise,
     new Promise((_, reject) => {
       setTimeout(
         () => reject(Object.assign(new Error("BALANCE_CHAIN_BUDGET"), { code: "BALANCE_CHAIN_BUDGET" })),
-        BALANCE_CHAIN_BUDGET_MS
+        ms
       );
     }),
   ]);
@@ -303,6 +309,7 @@ app.get("/wallet/balance", async (req, res) => {
   const platform_user_id = req.query.platform_user_id;
   const locale = (req.query.locale || "en").toLowerCase().slice(0, 5);
   const debugPermit = String(req.query.debug_permit || "") === "1";
+  const budgetMs = clampInt(req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? 8000;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, platform_user_id)), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   const memBal = Number(u.balance || 0);
@@ -313,7 +320,7 @@ app.get("/wallet/balance", async (req, res) => {
   if (u.secret_address && u.viewing_key) {
     let chainBal;
     try {
-      chainBal = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key));
+      chainBal = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
     } catch (e) {
       if (isBalanceBudgetError(e)) {
         return res.json({
@@ -340,14 +347,14 @@ app.get("/wallet/balance", async (req, res) => {
     let permitProbe = null;
     if (debugPermit) {
       try {
-        permitProbe = await withChainBudget(getSnvrBalanceWithPermitProbe(u.secret_address, u.permit));
+        permitProbe = await withChainBudget(getSnvrBalanceWithPermitProbe(u.secret_address, u.permit), budgetMs);
       } catch (e) {
         if (isBalanceBudgetError(e)) permitProbe = { ok: false, error_code: "BUDGET" };
         else throw e;
       }
     }
     try {
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit));
+      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
         rememberChainBalance(u, human);
@@ -426,6 +433,7 @@ function parsePermitInput(rawPermit) {
 /** 메신저 Zero-Log: 클라이언트가 permit/viewing key를 담아 보냄. 저장 안 함. */
 app.post("/wallet/balance", async (req, res) => {
   const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit, debug_permit } = req.body || {};
+  const budgetMs = clampInt(req.body?.budget_ms ?? req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? 8000;
   const permit = parsePermitInput(rawPermit);
   const debugPermit = String(debug_permit || "") === "1";
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
@@ -446,14 +454,14 @@ app.post("/wallet/balance", async (req, res) => {
     let permitProbe = null;
     if (debugPermit) {
       try {
-        permitProbe = await withChainBudget(getSnvrBalanceWithPermitProbe(secret_address, permit));
+        permitProbe = await withChainBudget(getSnvrBalanceWithPermitProbe(secret_address, permit), budgetMs);
       } catch (e) {
         if (isBalanceBudgetError(e)) permitProbe = { ok: false, error_code: "BUDGET" };
         else throw e;
       }
     }
     try {
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit));
+      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit), budgetMs);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
         rememberChainBalance(u, human);
@@ -478,7 +486,7 @@ app.post("/wallet/balance", async (req, res) => {
       let probeOnFail = permitProbe;
       if (!probeOnFail) {
         try {
-          probeOnFail = await withChainBudget(getSnvrBalanceWithPermitProbe(secret_address, permit));
+          probeOnFail = await withChainBudget(getSnvrBalanceWithPermitProbe(secret_address, permit), budgetMs);
         } catch (e2) {
           if (isBalanceBudgetError(e2)) probeOnFail = { ok: false, error_code: "BUDGET" };
           else throw e2;
@@ -496,7 +504,7 @@ app.post("/wallet/balance", async (req, res) => {
   // 2) viewing key fallback
   if (secret_address && viewing_key) {
     try {
-      const chainBal = await withChainBudget(getSnvrBalance(secret_address, viewing_key));
+      const chainBal = await withChainBudget(getSnvrBalance(secret_address, viewing_key), budgetMs);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
         rememberChainBalance(u, human);
@@ -514,7 +522,7 @@ app.post("/wallet/balance", async (req, res) => {
   // 3) 저장된 기존 링크(permit 우선 → viewing key) fallback
   if (u.secret_address && u.permit) {
     try {
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit));
+      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
         rememberChainBalance(u, human);
@@ -531,7 +539,7 @@ app.post("/wallet/balance", async (req, res) => {
   if (u.secret_address && u.viewing_key) {
     let chainBal;
     try {
-      chainBal = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key));
+      chainBal = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
     } catch (e) {
       if (isBalanceBudgetError(e)) {
         return res.json({ ok: true, balance: fbBal, source: "memory_fallback", auth: "chain_slow", message: "chain_query_budget" });
