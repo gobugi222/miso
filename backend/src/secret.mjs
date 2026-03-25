@@ -82,16 +82,29 @@ function loadConfig() {
       break;
     }
   }
+  // Railway에 `deploy-*.json`이 포함되지 않아 loadConfig가 full/ghost를 못 읽는 경우가 있어
+  // 최소 동작을 위해 fallback(배포 고정값)을 code에 박아둔다.
+  const fallbackFull = {
+    snvr_token: "secret1d6qvapy96q94etwlnc7j33dlzmenz4j70w3ew7",
+    snvr_code_hash: "ff84f11b7639a1012126559dad4b41d5bf698b69657b09d7aea8483fe372c500",
+    mixer_address: "secret1xlk86ftw8ljfxr95y2eg28jetp8umfvkv8hf8j",
+    mixer_code_hash: "39a7c0a41abc0f00cb7ccea95947bf805e1a37cea20cffdd43536c78be06e770",
+    chain_id: "secret-4",
+  };
+  const fallbackGhost = {
+    ghostswap_router_address: "secret1kcr3s86rfehq5cykpnpccdsgkcp5dzcjrmkq3g",
+    ghostswap_router_code_hash: "ab8d67fa0a341dfe78a0c54c1e3b31ddf21e9271b609dda352ebbb6a7a14bb21",
+  };
   const chainId = full.chain_id || process.env.CHAIN_ID || "secretdev-1";
   const isSecretMainnet = chainId === "secret-4" || String(chainId).includes("secret-4");
   const defaultLcd = isSecretMainnet ? "https://lcd.secret.express" : "http://localhost:1317";
   config = {
-    snvr_token: full.snvr_token,
-    snvr_code_hash: full.snvr_code_hash,
-    mixer_address: full.mixer_address,
-    mixer_code_hash: full.mixer_code_hash,
-    router_address: ghost.ghostswap_router_address,
-    router_code_hash: ghost.ghostswap_router_code_hash,
+    snvr_token: full.snvr_token || fallbackFull.snvr_token,
+    snvr_code_hash: full.snvr_code_hash || fallbackFull.snvr_code_hash,
+    mixer_address: full.mixer_address || fallbackFull.mixer_address,
+    mixer_code_hash: full.mixer_code_hash || fallbackFull.mixer_code_hash,
+    router_address: ghost.ghostswap_router_address || fallbackGhost.ghostswap_router_address,
+    router_code_hash: ghost.ghostswap_router_code_hash || fallbackGhost.ghostswap_router_code_hash,
     chain_id: chainId,
     lcd_url: process.env.LCD_URL || defaultLcd,
   };
