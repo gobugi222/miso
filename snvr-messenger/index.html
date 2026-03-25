@@ -1153,20 +1153,31 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       return true;
     }
 
+    function isApiNetworkFailure(r) {
+      if (!r || r.ok) return false;
+      if (Number(r.status) === 0) return true;
+      var msg = String((r.data && r.data.error) || "").toLowerCase();
+      return msg.indexOf("cannot reach") >= 0 || msg.indexOf("failed to fetch") >= 0 || msg.indexOf("networkerror") >= 0 || msg.indexOf("load failed") >= 0;
+    }
+    /** Telegram WebView·일시 Edge 장애 대비: fetch 3회까지 짧게 재시도 */
     async function api(path, body, method) {
       const url = getApiUrl() + path;
-      let opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
+      const opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
-      let res, text;
-      try {
-        res = await fetch(url, opt);
-        text = await res.text();
-      } catch (e) {
-        return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (e.message || "") + ")" } };
+      var lastErr = null;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          const res = await fetch(url, opt);
+          const text = await res.text();
+          var data = {};
+          try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
+          return { ok: res.ok, status: res.status, data };
+        } catch (e) {
+          lastErr = e;
+          if (attempt < 2) await new Promise(function (r) { setTimeout(r, 350 * (attempt + 1)); });
+        }
       }
-      let data = {};
-      try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
-      return { ok: res.ok, status: res.status, data };
+      return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (lastErr && lastErr.message ? lastErr.message : "") + ")" } };
     }
     async function syncServerWalletLink(secretAddress, viewingKey, permit) {
       const u = getUser();
@@ -1391,7 +1402,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         : "";
       const apiBase = getApiUrl();
       const failHint = resp && resp.ok === false
-        ? (" | HTTP=" + String(resp.status || 0) + " " + String(resp.data?.error || resp.data?.message || "").slice(0, 100) + " api=" + apiBase.slice(0, 48))
+        ? (" | HTTP=" + String(resp.status || 0) + " " + String(resp.data?.error || resp.data?.message || "").slice(0, 100) + " api=" + apiBase.slice(0, 48) +
+          (isApiNetworkFailure(resp) ? " | Keplr OK ≠ API OK" : ""))
         : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
         " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + pdHint + failHint;
@@ -1441,7 +1453,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
               if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
             } else if (!balanceR.ok) {
-              if (balanceEl) { balanceEl.textContent = "잔액 조회 시간 초과 — 다시 시도"; balanceEl.style.color = "#f85149"; }
+              if (balanceEl) {
+                balanceEl.textContent = isApiNetworkFailure(balanceR)
+                  ? "API 서버 연결 실패 — 지갑(Keplr)은 됐어도 api.snvr.org 통신이 안 됨. Telegram 밖 브라우저에서 app.snvr.org 열기·VPN/필터 끄기·잠시 후 재시도"
+                  : "잔액 조회 실패 — 잠시 후 다시 시도";
+                balanceEl.style.color = "#f85149";
+              }
             } else if (balanceR.data?.auth === "chain_slow" || balanceR.data?.message === "chain_query_budget") {
               if (balanceEl) {
                 balanceEl.textContent = "체인 지연 — Balance " + balance + " SNVR (앱 메모리)" + (statusText ? " · " + statusText : "");
