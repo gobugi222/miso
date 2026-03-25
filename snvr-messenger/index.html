@@ -1385,8 +1385,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const addr = String(c.secret_address || "").trim();
       const shortAddr = addr ? maskSecretAddress(addr) : "-";
       const hasPermit = isPermitSessionValid(c.permit) ? "yes" : "no";
+      const pd = resp?.data?.permit_debug;
+      const pdHint = pd && typeof pd === "object" && pd.ok === false
+        ? (" | err=" + String(pd.error_code || pd.reason || "") + (Array.isArray(pd.errors) && pd.errors[0] ? (": " + String(pd.errors[0]).slice(0, 120)) : ""))
+        : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + pdHint;
     }
 
     function profileAvatarUrl() {
