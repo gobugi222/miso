@@ -1,6 +1,6 @@
 /**
- * Secret Network + SNVR 연동
- * SNIP-20 잔액, GhostSwap, Mixer
+ * Secret Network + SNVR ?곕룞
+ * SNIP-20 ?붿븸, GhostSwap, Mixer
  */
 import { SecretNetworkClient, Wallet } from "secretjs";
 import { readFileSync, existsSync } from "fs";
@@ -15,7 +15,7 @@ let txClient = null;
 
 const DECIMALS = 9;
 
-/** 한 LCD URL에서 잔액 조회 시 최대 대기 (무응답 노드로 10분+ 걸리는 것 방지) */
+/** ??LCD URL?먯꽌 ?붿븸 議고쉶 ??理쒕? ?湲?(臾댁쓳???몃뱶濡?10遺? 嫄몃━??寃?諛⑹?) */
 const LCD_PROBE_PER_URL_MS = Number(process.env.LCD_PROBE_PER_URL_MS) || 20000;
 const LCD_MAX_URLS = Math.max(1, Math.min(6, Number(process.env.LCD_MAX_URLS) || 4));
 
@@ -26,7 +26,7 @@ function withLcdTimeout(promise, ms) {
   ]);
 }
 
-/** mainnet 조회용: 한 LCD가 HTML/502/invalid json을 줄 때 순서대로 재시도 */
+/** mainnet 議고쉶?? ??LCD媛 HTML/502/invalid json??以????쒖꽌?濡??ъ떆??*/
 function getLcdCandidates() {
   loadConfig();
   const primary = String(process.env.LCD_URL || config.lcd_url || "http://localhost:1317").replace(/\/$/, "");
@@ -36,9 +36,9 @@ function getLcdCandidates() {
     .filter(Boolean);
   const chain = String(config.chain_id || "");
   const isMainnet = chain === "secret-4" || chain.includes("secret-4");
-  /** secret-4: Railway LCD_URL이 느린 노드면 첫 URL에서 예산만 태움 → express 먼저 */
+  /** secret-4: Railway LCD_URL???먮┛ ?몃뱶硫?泥?URL?먯꽌 ?덉궛留??쒖? ??express 癒쇱? */
   const mainnetFast = "https://lcd.secret.express";
-  const mainnetBaked = ["https://rest.lavenderfive.com/secretnetwork"];
+  const mainnetBaked = [];
   const out = [];
   const seen = new Set();
   const ordered = isMainnet
@@ -128,7 +128,7 @@ function getTxClient() {
   return txClient;
 }
 
-/** SNIP-20 잔액 조회 (address + viewing_key) */
+/** SNIP-20 ?붿븸 議고쉶 (address + viewing_key) */
 export async function getSnvrBalance(address, viewingKey) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return null;
@@ -159,7 +159,7 @@ export async function getSnvrBalance(address, viewingKey) {
   return null;
 }
 
-/** SNIP-20 잔액 조회 (address + permit) */
+/** SNIP-20 ?붿븸 議고쉶 (address + permit) */
 export async function getSnvrBalanceWithPermit(address, permit) {
   const probe = await getSnvrBalanceWithPermitProbe(address, permit);
   if (probe.ok) return probe.amount;
@@ -231,7 +231,7 @@ async function getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c) {
   return { ok: true, amount: String(Math.max(...candidates)), errors };
 }
 
-/** Permit 조회 진단용: 어떤 경로에서 실패했는지 상세 반환 */
+/** Permit 議고쉶 吏꾨떒?? ?대뼡 寃쎈줈?먯꽌 ?ㅽ뙣?덈뒗吏 ?곸꽭 諛섑솚 */
 export async function getSnvrBalanceWithPermitProbe(address, permit) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return { ok: false, error_code: "CONFIG_MISSING", errors: [] };
@@ -263,7 +263,7 @@ export async function getSnvrBalanceWithPermitProbe(address, permit) {
   return last;
 }
 
-/** SNVR 전송 (백엔드 지갑에서) */
+/** SNVR ?꾩넚 (諛깆뿏??吏媛묒뿉?? */
 export async function sendSnvr(toAddress, amountRaw) {
   const client = getTxClient();
   if (!client) return { ok: false, error: "MNEMONIC not set" };
@@ -287,7 +287,7 @@ export async function sendSnvr(toAddress, amountRaw) {
   }
 }
 
-/** Mixer MixedWithdraw (owner만 호출 가능) */
+/** Mixer MixedWithdraw (owner留??몄텧 媛?? */
 export async function mixerWithdraw(recipientAddress, amountRaw) {
   const client = getTxClient();
   if (!client) return { ok: false, error: "MNEMONIC not set" };
@@ -311,7 +311,7 @@ export async function mixerWithdraw(recipientAddress, amountRaw) {
   }
 }
 
-/** 수령인 해석: @username -> user_key -> secret_address, 또는 secret1... 직접 */
+/** ?섎졊???댁꽍: @username -> user_key -> secret_address, ?먮뒗 secret1... 吏곸젒 */
 export function resolveRecipientToSecretAddress(recipient, users) {
   const r = String(recipient || "").trim();
   if (r.startsWith("secret1")) return r;
