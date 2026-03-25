@@ -1159,15 +1159,28 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var msg = String((r.data && r.data.error) || "").toLowerCase();
       return msg.indexOf("cannot reach") >= 0 || msg.indexOf("failed to fetch") >= 0 || msg.indexOf("networkerror") >= 0 || msg.indexOf("load failed") >= 0;
     }
-    /** Telegram WebView·일시 Edge 장애 대비: fetch 3회까지 짧게 재시도 */
+    /** 경로별 fetch 상한 — 응답 없이 무한 대기(로딩 멈춤) 방지 */
+    function apiFetchTimeoutMs(path) {
+      var p = String(path || "");
+      if (p.indexOf("/wallet/balance") === 0) return 95000;
+      if (p.indexOf("/wallet/link-secret") === 0) return 34000;
+      if (p.indexOf("/wallet/bot-balance-sync") === 0) return 34000;
+      return 45000;
+    }
+    /** Telegram WebView·Edge 일시 장애 대비: 재시도 + 매 시도마다 새 타임아웃 시그널 */
     async function api(path, body, method) {
       const url = getApiUrl() + path;
       const opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
+      const timeoutMs = apiFetchTimeoutMs(path);
       var lastErr = null;
       for (var attempt = 0; attempt < 3; attempt++) {
         try {
-          const res = await fetch(url, opt);
+          var fetchOpts = opt;
+          if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+            fetchOpts = Object.assign({}, opt, { signal: AbortSignal.timeout(timeoutMs) });
+          }
+          const res = await fetch(url, fetchOpts);
           const text = await res.text();
           var data = {};
           try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
@@ -1819,43 +1832,49 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           statusEl.className = "error";
           setKeplrFlowStatus("error_no_auth");
           return;
-        } else {
-          setCreds(secretAddress, "", permit);
-          if (permit) {
-            let linkR = await syncServerWalletLink(secretAddress, "", permit);
-            if (!linkR.ok && !linkR.skipped) {
-              linkR = await syncServerWalletLink(secretAddress, "", permit);
-            }
-            if (!linkR.ok && !linkR.skipped) {
-              statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
-              statusEl.className = "error";
-              setKeplrFlowStatus("error_server_link_sync");
-              return;
-            }
-            // Verify server side really has wallet auth after connect.
-            const verifyR = await api(
-              "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
-              "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
-            );
-            if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
-              // One more forced sync before continuing.
-              await syncServerWalletLink(secretAddress, "", permit);
-              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
-            }
-          }
-          statusEl.textContent = "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready)";
-          statusEl.className = "success";
-          setKeplrFlowStatus("connected");
         }
+        setCreds(secretAddress, "", permit);
+        statusEl.textContent =
+          "✅ 지갑 연결 완료 (이 기기에 저장됨). 서버(api) 동기화·잔액 조회는 뒤에서 진행됩니다.";
+        statusEl.className = "success";
+        setKeplrFlowStatus("connected");
         if (isTelegramInAppBrowser()) {
-          statusEl.textContent += "  You can return to Telegram now.";
+          statusEl.textContent += " (mini app은 보통 나갔다 와도 유지; 초기화되면 다시 Connect)";
         }
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        if (permit) await enableBotBalanceSyncOnServer(secretAddress, "", permit);
-        refreshProfileSidebar();
+        void refreshProfileSidebar();
         tryAutoReturnAfterConnect();
+        void (async function keplrServerFollowup() {
+          var st = document.getElementById("keplrStatus");
+          try {
+            var linkR = await syncServerWalletLink(secretAddress, "", permit);
+            if (!linkR.ok && !linkR.skipped) linkR = await syncServerWalletLink(secretAddress, "", permit);
+            var verifyR = await api(
+              "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
+              "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
+            );
+            if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
+              await syncServerWalletLink(secretAddress, "", permit);
+              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+            } else {
+              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+            }
+            if (st && linkR && !linkR.ok && !linkR.skipped) {
+              st.textContent =
+                "✅ 이 기기 지갑은 연결됨. 서버(api.snvr.org)에 주소 저장이 실패했을 수 있음 — 네트워크 확인 후 [Connect Keplr] 한 번 더.";
+              st.className = "error";
+            }
+          } catch (_e) {
+            if (st) {
+              st.textContent =
+                "✅ 이 기기 지갑은 연결됨. 서버 맞춤 중 오류 — 잠시 뒤 설정에서 [Connect Keplr] 재시도.";
+              st.className = "search-hint";
+            }
+          }
+          void refreshProfileSidebar();
+        })();
       } catch (e) {
         statusEl.textContent = "Error: " + (e.message || String(e));
         statusEl.className = "error";
