@@ -193,38 +193,6 @@ async function getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c) {
     errors.push("path1:" + String(_e1?.message || "unknown"));
   }
 
-  try {
-    const r2 = await client.query.compute.queryContract({
-      contract_address: c.snvr_token,
-      code_hash: c.snvr_code_hash,
-      query: {
-        with_permit: {
-          permit,
-          query: { balance: { address: target } },
-        },
-      },
-    });
-    pickAmount(r2?.balance?.amount);
-  } catch (_e2) {
-    errors.push("path2:" + String(_e2?.message || "unknown"));
-  }
-
-  try {
-    const r3 = await client.query.compute.queryContract({
-      contract_address: c.snvr_token,
-      code_hash: c.snvr_code_hash,
-      query: {
-        with_permit: {
-          permit,
-          query: { balance: {} },
-        },
-      },
-    });
-    pickAmount(r3?.balance?.amount);
-  } catch (_e3) {
-    errors.push("path3:" + String(_e3?.message || "unknown"));
-  }
-
   if (!candidates.length) {
     const combined = errors.join(" | ").toLowerCase();
     if (combined.includes("permit") || combined.includes("signature") || combined.includes("permission")) {
