@@ -1378,8 +1378,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (r && r.ok && r.data) {
           const src = String(r.data.source || "");
           const auth = String(r.data.auth || "");
-          // Don't show misleading "0" when backend is still doing chain lookup.
-          if (src === "memory_fallback" && auth === "chain_slow") b.textContent = "...";
+          const wantsAuth = hasWalletAuthCreds(getCreds());
+          // Don't show misleading "0" when we still have valid permit/viewing key but backend fell back.
+          if ((src === "memory_fallback" && auth === "chain_slow") || (src === "memory" && wantsAuth)) b.textContent = "...";
           else b.textContent = r.data.balance;
         } else {
           b.textContent = 0;
