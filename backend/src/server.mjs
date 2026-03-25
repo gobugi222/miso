@@ -35,8 +35,8 @@ const PORT = Number(process.env.PORT) || 3000;
 const MOCK = process.env.MOCK_AZTEC !== undefined && process.env.MOCK_AZTEC !== "0";
 const USE_SECRET = process.env.SECRET_NETWORK === "1" && isSecretEnabled();
 
-// /wallet/balance 체인 조회가 느려도 API가 멈추지 않게 “예산(budget_ms)”을 강제한다.
-const BALANCE_CHAIN_BUDGET_MS = 260000;
+// Balance: keep API responsive even when LCD is slow.
+const BALANCE_CHAIN_BUDGET_MS = Math.max(5000, Math.min(260000, Number(process.env.BALANCE_CHAIN_BUDGET_MS) || 90000));
 function clampInt(n, min, max) {
   const x = Number(n);
   if (!Number.isFinite(x)) return null;
@@ -47,10 +47,7 @@ function withChainBudget(promise, budgetMs = BALANCE_CHAIN_BUDGET_MS) {
   return Promise.race([
     promise,
     new Promise((_, reject) => {
-      setTimeout(
-        () => reject(Object.assign(new Error("BALANCE_CHAIN_BUDGET"), { code: "BALANCE_CHAIN_BUDGET" })),
-        ms
-      );
+      setTimeout(() => reject(Object.assign(new Error("BALANCE_CHAIN_BUDGET"), { code: "BALANCE_CHAIN_BUDGET" })), ms);
     }),
   ]);
 }
@@ -213,7 +210,7 @@ function rememberChainBalance(u, humanBalance) {
   if (!u || !Number.isFinite(n) || n < 0) return;
   u.last_chain_balance = n;
   u.last_chain_at = Date.now();
-  // Keep memory aligned so UI won't show stale zero after budget cut.
+  // keep memory aligned so fallback won't show stale zero
   u.balance = n;
 }
 
@@ -226,6 +223,17 @@ function getFallbackBalance(u) {
     if (ageMs < 24 * 60 * 60 * 1000) return Math.max(mem, last);
   }
   return mem;
+}
+
+const inflightChain = new Map();
+function scheduleChainRefresh(userKey, fn) {
+  if (inflightChain.get(userKey)) return false;
+  inflightChain.set(userKey, true);
+  Promise.resolve()
+    .then(fn)
+    .catch((_e) => {})
+    .finally(() => inflightChain.delete(userKey));
+  return true;
 }
 
 const CHAT_NOTIFY_MSG = {
@@ -313,70 +321,42 @@ app.get("/wallet/balance", async (req, res) => {
   const fbBal = getFallbackBalance(u);
   const chainLinked = Boolean(u.secret_address && (u.viewing_key || u.permit));
   if (locale && ["en", "ko", "ja"].includes(locale)) u.locale = locale;
-  if (u.secret_address && u.viewing_key) {
-    try {
-      const chainBal = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
-      if (chainBal != null) {
-        const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        if (human === 0 && fbBal > 0) {
-          return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow" });
+  // Fast response: return cached chain (last_chain_balance) if present; never block on LCD.
+  const hasCachedChain = Number.isFinite(Number(u.last_chain_balance)) && Number(u.last_chain_balance) >= 0 && Number(u.last_chain_at || 0) > 0;
+  const immediate = hasCachedChain ? Math.max(fbBal, Number(u.last_chain_balance)) : fbBal;
+  const userKey = platformKey(platform, platform_user_id);
+  let pending_chain = false;
+  // Background refresh when linked and cache is stale (>15s) or missing.
+  const stale = !hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
+  if (stale && u.secret_address && (u.permit || u.viewing_key)) {
+    pending_chain = scheduleChainRefresh(userKey, async () => {
+      try {
+        let raw = null;
+        if (u.permit) raw = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
+        else if (u.viewing_key) raw = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
+        if (raw != null) {
+          const human = Number(raw) / 1e9;
+          rememberChainBalance(u, human);
+          saveDb();
         }
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "viewing_key" });
-      }
-    } catch (e) {
-      if (isBalanceBudgetError(e)) {
-        return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow", message: "chain_query_budget" });
-      }
-      if (e?.message === "VIEWING_KEY_INVALID") {
-        return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "viewing_key_invalid" });
-      }
-      throw e;
-    }
+      } catch (_e) { /* ignore */ }
+    });
   }
-  if (u.secret_address && u.permit) {
-    let permitProbe = null;
-    try {
-      if (debugPermit) {
-        try {
-          permitProbe = await withChainBudget(getSnvrBalanceWithPermitProbe(u.secret_address, u.permit), budgetMs);
-        } catch (e) {
-          if (isBalanceBudgetError(e)) permitProbe = { ok: false, error_code: "BUDGET" };
-          else throw e;
-        }
-      }
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
-      if (chainBal != null) {
-        const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        if (human === 0 && fbBal > 0) {
-          return res.json({
-            ok: true,
-            chain_linked: chainLinked,
-            balance: fbBal,
-            source: "memory_fallback",
-            auth: "chain_slow",
-            permit_debug: permitProbe || undefined,
-          });
-        }
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "permit", permit_debug: permitProbe || undefined });
-      }
-    } catch (e) {
-      if (isBalanceBudgetError(e)) {
-        return res.json({
-          ok: true,
-          chain_linked: chainLinked,
-          balance: fbBal,
-          source: "memory_fallback",
-          auth: "chain_slow",
-          permit_debug: permitProbe || { ok: false, error_code: "BUDGET" },
-          message: "chain_query_budget",
-        });
-      }
-      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "permit_invalid", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
-    }
+  const out = {
+    ok: true,
+    chain_linked: chainLinked,
+    balance: immediate,
+    source: hasCachedChain ? "cached_chain" : "memory_fallback",
+    auth: hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
+    pending_chain,
+  };
+  if (debugPermit && u.secret_address && u.permit) {
+    // Probe is best-effort and should not block the response.
+    scheduleChainRefresh(userKey + "::probe", async () => {
+      try { await withChainBudget(getSnvrBalanceWithPermitProbe(u.secret_address, u.permit), budgetMs); } catch (_e) {}
+    });
   }
-  return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory" });
+  return res.json(out);
 });
 
 function parsePermitInput(rawPermit) {
@@ -408,85 +388,61 @@ app.post("/wallet/balance", async (req, res) => {
   const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit, debug_permit } = req.body || {};
   const permit = parsePermitInput(rawPermit);
   const debugPermit = String(debug_permit || "") === "1";
-  const budgetMs = clampInt(req.body?.budget_ms ?? req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? 8000;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   const memBal = Number(u.balance || 0);
-  const fbBal = getFallbackBalance(u);
-  const chainLinked = Boolean(u.secret_address && (u.viewing_key || u.permit));
   // 1) permit 우선
   if (secret_address && permit) {
     let permitProbe = null;
+    if (debugPermit) permitProbe = await getSnvrBalanceWithPermitProbe(secret_address, permit);
     try {
-      if (debugPermit) {
-        try {
-          permitProbe = await withChainBudget(getSnvrBalanceWithPermitProbe(secret_address, permit), budgetMs);
-        } catch (e) {
-          if (isBalanceBudgetError(e)) permitProbe = { ok: false, error_code: "BUDGET" };
-          else throw e;
-        }
-      }
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit), budgetMs);
+      const chainBal = await getSnvrBalanceWithPermit(secret_address, permit);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        if (human === 0 && fbBal > 0) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow", permit_debug: permitProbe || undefined });
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "permit", permit_debug: permitProbe || undefined });
+        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit", permit_debug: permitProbe || undefined });
+        return res.json({ ok: true, balance: human, source: "chain", auth: "permit", permit_debug: permitProbe || undefined });
       }
     } catch (e) {
-      if (isBalanceBudgetError(e)) {
-        return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow", permit_debug: permitProbe || { ok: false, error_code: "BUDGET" }, message: "chain_query_budget" });
-      }
-      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "permit_invalid", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "permit_invalid", permit_debug: permitProbe || { ok: false, error_code: "PERMIT_INVALID" } });
       throw e;
     }
   }
   // 2) viewing key fallback
   if (secret_address && viewing_key) {
     try {
-      const chainBal = await withChainBudget(getSnvrBalance(secret_address, viewing_key), budgetMs);
+      const chainBal = await getSnvrBalance(secret_address, viewing_key);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        if (human === 0 && fbBal > 0) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow" });
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "viewing_key" });
+        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "viewing_key" });
+        return res.json({ ok: true, balance: human, source: "chain", auth: "viewing_key" });
       }
     } catch (e) {
-      if (isBalanceBudgetError(e)) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow", message: "chain_query_budget" });
-      if (e?.message === "VIEWING_KEY_INVALID") return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "viewing_key_invalid" });
+      if (e?.message === "VIEWING_KEY_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "viewing_key_invalid" });
       throw e;
     }
   }
   // 3) 저장된 기존 링크(permit 우선 → viewing key) fallback
   if (u.secret_address && u.permit) {
     try {
-      const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
+      const chainBal = await getSnvrBalanceWithPermit(u.secret_address, u.permit);
       if (chainBal != null) {
         const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        if (human === 0 && fbBal > 0) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow" });
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "stored_permit" });
+        if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "stored_permit" });
+        return res.json({ ok: true, balance: human, source: "chain", auth: "stored_permit" });
       }
     } catch (e) {
-      if (isBalanceBudgetError(e)) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow", message: "chain_query_budget" });
-      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "stored_permit_invalid" });
+      if (e?.message === "PERMIT_INVALID") return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "stored_permit_invalid" });
     }
   }
   if (u.secret_address && u.viewing_key) {
-    try {
-      const chainBal = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
-      if (chainBal != null) {
-        const human = Number(chainBal) / 1e9;
-        rememberChainBalance(u, human);
-        if (human === 0 && fbBal > 0) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow" });
-        return res.json({ ok: true, chain_linked: chainLinked, balance: human, source: "chain", auth: "stored_viewing_key" });
-      }
-    } catch (e) {
-      if (isBalanceBudgetError(e)) return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory_fallback", auth: "chain_slow", message: "chain_query_budget" });
-      throw e;
+    const chainBal = await getSnvrBalance(u.secret_address, u.viewing_key);
+    if (chainBal != null) {
+      const human = Number(chainBal) / 1e9;
+      if (human === 0 && memBal > 0) return res.json({ ok: true, balance: memBal, source: "memory_fallback", auth: "stored_viewing_key" });
+      return res.json({ ok: true, balance: human, source: "chain", auth: "stored_viewing_key" });
     }
   }
-  return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory" });
+  return res.json({ ok: true, balance: memBal, source: "memory" });
 });
 
 /** 체인 연동 시 체인 잔액, 아니면 메모리 잔액 (mix/swap 잔액 검사용) */
