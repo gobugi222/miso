@@ -849,6 +849,18 @@ bot.command("postad", async (ctx) => {
 });
 
 // AI 비서: OWNER_TELEGRAM_ID만 사용 가능. .env에 OWNER_TELEGRAM_ID=내텔레그램숫자ID 설정.
+/** Handler errors default to rethrow + exitCode=1 — keep polling alive and log for Railway. */
+bot.catch((err, ctx) => {
+  console.error("[snvr-bot handler error]", err?.message || err, "update=", ctx?.update?.update_id);
+  if (err?.stack) console.error(err.stack.slice(0, 500));
+  const chatId = ctx?.chat?.id;
+  if (chatId) {
+    const msg =
+      "일시적 오류가 났어요. 잠시 후 다시 시도해 주세요.\n(Temporary error — please try again.)";
+    ctx.reply(msg).catch(() => {});
+  }
+});
+
 bot.command("ask", async (ctx) => {
   const ownerId = String(OWNER_TELEGRAM_ID).trim();
   if (!ownerId || String(ctx.from?.id) !== ownerId) {
@@ -889,7 +901,21 @@ bot.command("ask", async (ctx) => {
   }
 });
 
-bot.launch().then(() => console.log("Snvr bot running (Ctrl+C to stop)"));
+process.on("unhandledRejection", (reason) => {
+  console.error("[snvr-bot unhandledRejection]", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[snvr-bot uncaughtException]", err?.message || err);
+  process.exit(1);
+});
+
+bot
+  .launch()
+  .then(() => console.log("Snvr bot running (long polling). Set Railway replicas=1 for same BOT_TOKEN."))
+  .catch((e) => {
+    console.error("[bot.launch FAILED]", e?.message || e);
+    process.exit(1);
+  });
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
