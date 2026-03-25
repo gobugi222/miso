@@ -1,6 +1,6 @@
 /**
- * Secret Network + SNVR ?곕룞
- * SNIP-20 ?붿븸, GhostSwap, Mixer
+ * Secret Network + SNVR 연동
+ * SNIP-20 잔액, GhostSwap, Mixer
  */
 import { SecretNetworkClient, Wallet } from "secretjs";
 import { readFileSync, existsSync } from "fs";
@@ -15,12 +15,10 @@ let txClient = null;
 
 const DECIMALS = 9;
 
-/** ??LCD URL?먯꽌 ?붿븸 議고쉶 ??理쒕? ?湲?(臾댁쓳???몃뱶濡?10遺? 嫄몃━??寃?諛⑹?) */
-// LCD가 순간 장애/지연되면 permit 조회가 오래 물려서 UI가 멈추는 문제가 생긴다.
-// 기본값을 줄여서 실패가 빨리 나고, 후보 URL도 줄여 전체 지연을 제한한다.
-const LCD_PROBE_PER_URL_MS = Math.max(4000, Math.min(20000, Number(process.env.LCD_PROBE_PER_URL_MS) || 8000));
+// Permit 조회가 probe 루틴 때문에 느려지는 문제 방지:
+// viewing key처럼 "짧은 타임아웃 + LCD 후보 순회"로 바로 getBalance를 시도한다.
+const LCD_PROBE_PER_URL_MS = Math.max(4000, Math.min(25000, Number(process.env.LCD_PROBE_PER_URL_MS) || 20000));
 const LCD_MAX_URLS = Math.max(1, Math.min(3, Number(process.env.LCD_MAX_URLS) || 2));
-
 function withLcdTimeout(promise, ms) {
   return Promise.race([
     promise,
@@ -28,7 +26,12 @@ function withLcdTimeout(promise, ms) {
   ]);
 }
 
-/** mainnet 議고쉶?? ??LCD媛 HTML/502/invalid json??以????쒖꽌?濡??ъ떆??*/
+// Short cache to smooth LCD jitter (do NOT treat as authoritative long-term).
+// Keyed by secret address only; permit must authorize that address anyway.
+const BAL_CACHE_TTL_MS = Math.max(3000, Math.min(30000, Number(process.env.BAL_CACHE_TTL_MS) || 12000));
+const balCache = new Map(); // address -> { at, amount }
+
+/** mainnet 조회용: 한 LCD가 HTML/502/invalid json을 줄 때 순서대로 재시도 */
 function getLcdCandidates() {
   loadConfig();
   const primary = String(process.env.LCD_URL || config.lcd_url || "http://localhost:1317").replace(/\/$/, "");
@@ -38,15 +41,12 @@ function getLcdCandidates() {
     .filter(Boolean);
   const chain = String(config.chain_id || "");
   const isMainnet = chain === "secret-4" || chain.includes("secret-4");
-  /** secret-4: Railway LCD_URL???먮┛ ?몃뱶硫?泥?URL?먯꽌 ?덉궛留??쒖? ??express 癒쇱? */
-  const mainnetFast = "https://lcd.secret.express";
-  const mainnetBaked = [];
+  const baked = isMainnet
+    ? ["https://lcd.secret.express", "https://rest.lavenderfive.com/secretnetwork"]
+    : [];
   const out = [];
   const seen = new Set();
-  const ordered = isMainnet
-    ? [mainnetFast, primary, ...fromEnv, ...mainnetBaked]
-    : [primary, ...fromEnv];
-  for (const u of ordered) {
+  for (const u of [primary, ...fromEnv, ...baked]) {
     if (!u || seen.has(u)) continue;
     seen.add(u);
     out.push(u);
@@ -84,31 +84,15 @@ function loadConfig() {
       break;
     }
   }
-  // Railway에 `deploy-*.json`이 포함되지 않아 loadConfig가 full/ghost를 못 읽는 경우가 있어
-  // 최소 동작을 위해 fallback(배포 고정값)을 code에 박아둔다.
-  const fallbackFull = {
-    snvr_token: "secret1d6qvapy96q94etwlnc7j33dlzmenz4j70w3ew7",
-    snvr_code_hash: "ff84f11b7639a1012126559dad4b41d5bf698b69657b09d7aea8483fe372c500",
-    mixer_address: "secret1xlk86ftw8ljfxr95y2eg28jetp8umfvkv8hf8j",
-    mixer_code_hash: "39a7c0a41abc0f00cb7ccea95947bf805e1a37cea20cffdd43536c78be06e770",
-    chain_id: "secret-4",
-  };
-  const fallbackGhost = {
-    ghostswap_router_address: "secret1kcr3s86rfehq5cykpnpccdsgkcp5dzcjrmkq3g",
-    ghostswap_router_code_hash: "ab8d67fa0a341dfe78a0c54c1e3b31ddf21e9271b609dda352ebbb6a7a14bb21",
-  };
-  const chainId = full.chain_id || process.env.CHAIN_ID || "secretdev-1";
-  const isSecretMainnet = chainId === "secret-4" || String(chainId).includes("secret-4");
-  const defaultLcd = isSecretMainnet ? "https://lcd.secret.express" : "http://localhost:1317";
   config = {
-    snvr_token: full.snvr_token || fallbackFull.snvr_token,
-    snvr_code_hash: full.snvr_code_hash || fallbackFull.snvr_code_hash,
-    mixer_address: full.mixer_address || fallbackFull.mixer_address,
-    mixer_code_hash: full.mixer_code_hash || fallbackFull.mixer_code_hash,
-    router_address: ghost.ghostswap_router_address || fallbackGhost.ghostswap_router_address,
-    router_code_hash: ghost.ghostswap_router_code_hash || fallbackGhost.ghostswap_router_code_hash,
-    chain_id: chainId,
-    lcd_url: process.env.LCD_URL || defaultLcd,
+    snvr_token: full.snvr_token,
+    snvr_code_hash: full.snvr_code_hash,
+    mixer_address: full.mixer_address,
+    mixer_code_hash: full.mixer_code_hash,
+    router_address: ghost.ghostswap_router_address,
+    router_code_hash: ghost.ghostswap_router_code_hash,
+    chain_id: full.chain_id || process.env.CHAIN_ID || "secretdev-1",
+    lcd_url: process.env.LCD_URL || "http://localhost:1317",
   };
   return config;
 }
@@ -128,6 +112,11 @@ function getQueryClient() {
   return queryClient;
 }
 
+function getEphemeralQueryClient(url) {
+  const c = loadConfig();
+  return new SecretNetworkClient({ url, chainId: c.chain_id });
+}
+
 function getTxClient() {
   if (txClient) return txClient;
   const mnemonic = process.env.MNEMONIC;
@@ -143,7 +132,7 @@ function getTxClient() {
   return txClient;
 }
 
-/** SNIP-20 ?붿븸 議고쉶 (address + viewing_key) */
+/** SNIP-20 잔액 조회 (address + viewing_key) */
 export async function getSnvrBalance(address, viewingKey) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return null;
@@ -153,14 +142,11 @@ export async function getSnvrBalance(address, viewingKey) {
     forceLcdUrl(url);
     try {
       const client = getQueryClient();
-      const result = await withLcdTimeout(
-        client.query.snip20.getBalance({
-          contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
-          address: String(address).trim(),
-          auth: { key: String(viewingKey).trim() },
-        }),
-        LCD_PROBE_PER_URL_MS
-      );
+      const result = await client.query.snip20.getBalance({
+        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+        address: String(address).trim(),
+        auth: { key: String(viewingKey).trim() },
+      });
       const amount = result?.balance?.amount ?? "0";
       return amount;
     } catch (e) {
@@ -174,31 +160,55 @@ export async function getSnvrBalance(address, viewingKey) {
   return null;
 }
 
-/** SNIP-20 ?붿븸 議고쉶 (address + permit) */
+/** SNIP-20 잔액 조회 (address + permit) */
 export async function getSnvrBalanceWithPermit(address, permit) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return null;
   if (!permit || typeof permit !== "object") throw new Error("PERMIT_INVALID");
+  const addr = String(address).trim();
+
+  // 0) Short cache: returns instantly when we recently succeeded.
+  try {
+    const cached = balCache.get(addr);
+    if (cached && Date.now() - Number(cached.at || 0) < BAL_CACHE_TTL_MS) return String(cached.amount ?? "0");
+  } catch (_eCache) { /* ignore */ }
+
   const urls = getLcdCandidates();
-  let lastErrors = [];
-  for (const url of urls) {
-    forceLcdUrl(url);
+  const queryOnUrl = async (url) => {
+    const client = getEphemeralQueryClient(url);
+    const r = await withLcdTimeout(
+      client.query.snip20.getBalance({
+        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+        address: addr,
+        auth: { permit },
+      }),
+      LCD_PROBE_PER_URL_MS
+    );
+    const amount = r?.balance?.amount ?? "0";
+    // cache success
+    try { balCache.set(addr, { at: Date.now(), amount }); } catch (_eSet) { /* ignore */ }
+    return amount;
+  };
+
+  // 1) Race the first two LCDs to reduce worst-case latency.
+  const a = urls[0];
+  const b = urls[1];
+  if (a && b) {
     try {
-      const client = getQueryClient();
-      // permit도 viewing key처럼 "바로 getBalance"를 짧은 타임아웃으로 시도한다.
-      const r = await withLcdTimeout(
-        client.query.snip20.getBalance({
-          contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
-          address: String(address).trim(),
-          auth: { permit },
-        }),
-        LCD_PROBE_PER_URL_MS
-      );
-      const amount = r?.balance?.amount ?? "0";
+      const amount = await Promise.any([queryOnUrl(a), queryOnUrl(b)]);
       return amount;
+    } catch (_eRace) {
+      // fall through to sequential attempts
+    }
+  }
+
+  // 2) Sequential fallback for remaining candidates.
+  for (const url of urls) {
+    if (!url) continue;
+    try {
+      return await queryOnUrl(url);
     } catch (e) {
       const msg = String(e?.message || "");
-      lastErrors.push(url + ":" + msg);
       const low = msg.toLowerCase();
       if (low.includes("permit") || low.includes("signature") || low.includes("permission")) {
         throw new Error("PERMIT_INVALID");
@@ -227,12 +237,40 @@ async function getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c) {
       auth: { permit },
     });
     pickAmount(r1?.balance?.amount);
-    // 가장 싼 경로(path1)가 성공하면 r2/r3(무거운 compute 조회)를 생략해서 속도를 확보합니다.
-    if (candidates.length) {
-      return { ok: true, amount: String(Math.max(...candidates)), errors };
-    }
   } catch (_e1) {
     errors.push("path1:" + String(_e1?.message || "unknown"));
+  }
+
+  try {
+    const r2 = await client.query.compute.queryContract({
+      contract_address: c.snvr_token,
+      code_hash: c.snvr_code_hash,
+      query: {
+        with_permit: {
+          permit,
+          query: { balance: { address: target } },
+        },
+      },
+    });
+    pickAmount(r2?.balance?.amount);
+  } catch (_e2) {
+    errors.push("path2:" + String(_e2?.message || "unknown"));
+  }
+
+  try {
+    const r3 = await client.query.compute.queryContract({
+      contract_address: c.snvr_token,
+      code_hash: c.snvr_code_hash,
+      query: {
+        with_permit: {
+          permit,
+          query: { balance: {} },
+        },
+      },
+    });
+    pickAmount(r3?.balance?.amount);
+  } catch (_e3) {
+    errors.push("path3:" + String(_e3?.message || "unknown"));
   }
 
   if (!candidates.length) {
@@ -245,7 +283,7 @@ async function getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c) {
   return { ok: true, amount: String(Math.max(...candidates)), errors };
 }
 
-/** Permit 議고쉶 吏꾨떒?? ?대뼡 寃쎈줈?먯꽌 ?ㅽ뙣?덈뒗吏 ?곸꽭 諛섑솚 */
+/** Permit 조회 진단용: 어떤 경로에서 실패했는지 상세 반환 */
 export async function getSnvrBalanceWithPermitProbe(address, permit) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return { ok: false, error_code: "CONFIG_MISSING", errors: [] };
@@ -255,14 +293,7 @@ export async function getSnvrBalanceWithPermitProbe(address, permit) {
   for (const url of urls) {
     forceLcdUrl(url);
     try {
-      const once = await withLcdTimeout(
-        getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c),
-        LCD_PROBE_PER_URL_MS * 2
-      ).catch((e) => ({
-        ok: false,
-        error_code: "QUERY_FAILED",
-        errors: [String(e?.message || "lcd_probe_failed")],
-      }));
+      const once = await getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c);
       if (once.ok) return { ...once, lcd_used: url };
       if (once.error_code === "PERMIT_INVALID") return once;
       last = { ...once, lcd_tried: url };
@@ -277,7 +308,7 @@ export async function getSnvrBalanceWithPermitProbe(address, permit) {
   return last;
 }
 
-/** SNVR ?꾩넚 (諛깆뿏??吏媛묒뿉?? */
+/** SNVR 전송 (백엔드 지갑에서) */
 export async function sendSnvr(toAddress, amountRaw) {
   const client = getTxClient();
   if (!client) return { ok: false, error: "MNEMONIC not set" };
@@ -301,7 +332,7 @@ export async function sendSnvr(toAddress, amountRaw) {
   }
 }
 
-/** Mixer MixedWithdraw (owner留??몄텧 媛?? */
+/** Mixer MixedWithdraw (owner만 호출 가능) */
 export async function mixerWithdraw(recipientAddress, amountRaw) {
   const client = getTxClient();
   if (!client) return { ok: false, error: "MNEMONIC not set" };
@@ -325,7 +356,7 @@ export async function mixerWithdraw(recipientAddress, amountRaw) {
   }
 }
 
-/** ?섎졊???댁꽍: @username -> user_key -> secret_address, ?먮뒗 secret1... 吏곸젒 */
+/** 수령인 해석: @username -> user_key -> secret_address, 또는 secret1... 직접 */
 export function resolveRecipientToSecretAddress(recipient, users) {
   const r = String(recipient || "").trim();
   if (r.startsWith("secret1")) return r;
