@@ -1389,8 +1389,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const pdHint = pd && typeof pd === "object" && pd.ok === false
         ? (" | err=" + String(pd.error_code || pd.reason || "") + (Array.isArray(pd.errors) && pd.errors[0] ? (": " + String(pd.errors[0]).slice(0, 120)) : ""))
         : "";
+      const apiBase = getApiUrl();
+      const failHint = resp && resp.ok === false
+        ? (" | HTTP=" + String(resp.status || 0) + " " + String(resp.data?.error || resp.data?.message || "").slice(0, 100) + " api=" + apiBase.slice(0, 48))
+        : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + pdHint;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + pdHint + failHint;
     }
 
     function profileAvatarUrl() {
