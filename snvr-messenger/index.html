@@ -1162,7 +1162,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     /** 경로별 fetch 상한 — 응답 없이 무한 대기(로딩 멈춤) 방지 */
     function apiFetchTimeoutMs(path) {
       var p = String(path || "");
-      if (p.indexOf("/wallet/balance") === 0) return 95000;
+      /** 백엔드 BALANCE_CHAIN_BUDGET_MS(기본 190s) + 여유 */
+      if (p.indexOf("/wallet/balance") === 0) return 205000;
       if (p.indexOf("/wallet/link-secret") === 0) return 34000;
       if (p.indexOf("/wallet/bot-balance-sync") === 0) return 34000;
       return 45000;
@@ -1279,11 +1280,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       if (name === "mix") { refreshMixPending(); }
       if (name === "settings") {
-        loadProfileForm();
-        loadViewingKey();
-        loadWalletSnvrInfo();
-        refreshWalletLinkStatusUi();
-        loadBotBalanceSync();
+        void (async function settingsHydrate() {
+          try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
+          try { await ensureServerPermitSync(); } catch (_e) { /* ignore */ }
+          loadProfileForm();
+          loadViewingKey();
+          loadWalletSnvrInfo();
+          refreshWalletLinkStatusUi();
+          await loadBotBalanceSync();
+          void refreshProfileSidebar();
+        })();
       }
     }
     function showScreen(login) {
@@ -2840,9 +2846,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         hint.textContent = "Keplr opening... After approving in Keplr, return here and tap 'I approved in Keplr' if auto-connect does not start.";
       }
       try {
-        window.location.href = link;
+        var pop = window.open(link, "_blank", "noopener,noreferrer");
+        if (!pop || pop.closed) window.location.href = link;
       } catch (_e) {
-        /* ignore */
+        try { window.location.href = link; } catch (_e2) { /* ignore */ }
       }
       setTimeout(function () {
         if (hint) {
