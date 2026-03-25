@@ -68,6 +68,9 @@ function loadConfig() {
       break;
     }
   }
+  const chainId = full.chain_id || process.env.CHAIN_ID || "secretdev-1";
+  const isSecretMainnet = chainId === "secret-4" || String(chainId).includes("secret-4");
+  const defaultLcd = isSecretMainnet ? "https://lcd.secret.express" : "http://localhost:1317";
   config = {
     snvr_token: full.snvr_token,
     snvr_code_hash: full.snvr_code_hash,
@@ -75,8 +78,8 @@ function loadConfig() {
     mixer_code_hash: full.mixer_code_hash,
     router_address: ghost.ghostswap_router_address,
     router_code_hash: ghost.ghostswap_router_code_hash,
-    chain_id: full.chain_id || process.env.CHAIN_ID || "secretdev-1",
-    lcd_url: process.env.LCD_URL || "http://localhost:1317",
+    chain_id: chainId,
+    lcd_url: process.env.LCD_URL || defaultLcd,
   };
   return config;
 }
