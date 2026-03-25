@@ -712,6 +712,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LAST_DASHBOARD_VIEW_KEY = "snvr_last_dashboard_view";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
+    // Backend이 /wallet/chain-config를 아직 못 주는 순간에도 사용자가 Keplr에 등록할 수 있게
+    // 프론트에 최소값(배포 고정값)을 기본값으로 박아 둔다.
+    const DEFAULT_CHAIN_ID = "secret-4";
+    const DEFAULT_SNVR_CONTRACT = "secret1d6qvapy96q94etwlnc7j33dlzmenz4j70w3ew7";
+    const DEFAULT_SNVR_CODE_HASH = "ff84f11b7639a1012126559dad4b41d5bf698b69657b09d7aea8483fe372c500";
+    const DEFAULT_SNVR_DECIMALS = 9;
 
     const I18N = {
       en: {
@@ -1549,8 +1555,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var d = r.data || {};
       var addr = d.snvr_address || null;
       var hash = d.snvr_code_hash || null;
-      var dec = Number(d.snvr_decimals != null ? d.snvr_decimals : 9);
+      var dec = Number(d.snvr_decimals != null ? d.snvr_decimals : DEFAULT_SNVR_DECIMALS);
       if (!Number.isFinite(dec) || dec < 0) dec = 9;
+      // 백엔드가 아직 값(null)을 주는 상태에서도 사용자가 진행할 수 있게 fallback 주입
+      if (!addr) addr = DEFAULT_SNVR_CONTRACT;
+      if (!hash) hash = DEFAULT_SNVR_CODE_HASH;
+      if (d.chain_id) {
+        // backend 값이 있으면 그대로 사용
+      } else {
+        d.chain_id = DEFAULT_CHAIN_ID;
+      }
       contractEl.value = addr || "";
       hashEl.value = hash || "";
       contractEl.placeholder = addr ? "" : "(none)";
