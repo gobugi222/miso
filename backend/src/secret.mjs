@@ -185,6 +185,10 @@ async function getSnvrBalanceWithPermitProbeOnCurrentLcd(address, permit, c) {
       auth: { permit },
     });
     pickAmount(r1?.balance?.amount);
+    // 가장 싼 경로(path1)가 성공하면 r2/r3(무거운 compute 조회)를 생략해서 속도를 확보합니다.
+    if (candidates.length) {
+      return { ok: true, amount: String(Math.max(...candidates)), errors };
+    }
   } catch (_e1) {
     errors.push("path1:" + String(_e1?.message || "unknown"));
   }
