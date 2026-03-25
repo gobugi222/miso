@@ -176,9 +176,36 @@ export async function getSnvrBalance(address, viewingKey) {
 
 /** SNIP-20 ?붿븸 議고쉶 (address + permit) */
 export async function getSnvrBalanceWithPermit(address, permit) {
-  const probe = await getSnvrBalanceWithPermitProbe(address, permit);
-  if (probe.ok) return probe.amount;
-  if (probe.error_code === "PERMIT_INVALID") throw new Error("PERMIT_INVALID");
+  const c = loadConfig();
+  if (!c.snvr_token || !c.snvr_code_hash) return null;
+  if (!permit || typeof permit !== "object") throw new Error("PERMIT_INVALID");
+  const urls = getLcdCandidates();
+  let lastErrors = [];
+  for (const url of urls) {
+    forceLcdUrl(url);
+    try {
+      const client = getQueryClient();
+      // permit도 viewing key처럼 "바로 getBalance"를 짧은 타임아웃으로 시도한다.
+      const r = await withLcdTimeout(
+        client.query.snip20.getBalance({
+          contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
+          address: String(address).trim(),
+          auth: { permit },
+        }),
+        LCD_PROBE_PER_URL_MS
+      );
+      const amount = r?.balance?.amount ?? "0";
+      return amount;
+    } catch (e) {
+      const msg = String(e?.message || "");
+      lastErrors.push(url + ":" + msg);
+      const low = msg.toLowerCase();
+      if (low.includes("permit") || low.includes("signature") || low.includes("permission")) {
+        throw new Error("PERMIT_INVALID");
+      }
+      // else: try next LCD
+    }
+  }
   return null;
 }
 
