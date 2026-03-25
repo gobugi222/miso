@@ -1159,7 +1159,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
       let res, text;
       try {
-        var timeoutMs = path && String(path).indexOf("/wallet/balance") === 0 ? 2000 : 45000;
+        // /wallet/balance can include chain LCD probing; keep UI responsive but don't cut too aggressively.
+        var timeoutMs = path && String(path).indexOf("/wallet/balance") === 0 ? 16000 : 45000;
         // Ensure Telegram WebView doesn't "hang" when backend chain query is slow.
         var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
         var timer = null;
@@ -1326,14 +1327,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
       // chain 조회가 느려도 UI가 멈추지 않게 backend 예산(budget_ms) 강제
       var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      rBody.budget_ms = 1500;
+      rBody.budget_ms = 8000;
       let r = await api("/wallet/balance", rBody);
       let hadAuthFallback = false;
       if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
         // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
         var rBody2 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-        rBody2.budget_ms = 1500;
+        rBody2.budget_ms = 8000;
         r = await api("/wallet/balance", rBody2);
         if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
           hadAuthFallback = true;
@@ -1359,7 +1360,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             await syncServerWalletLink(c2.secret_address, "", c2.permit);
             await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
             var rBody3 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-            rBody3.budget_ms = 1500;
+            rBody3.budget_ms = 8000;
             const retry = await api("/wallet/balance", rBody3);
             if (retry?.ok) r = retry;
           } catch (_e) { /* ignore */ }
@@ -1375,15 +1376,42 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const b = document.getElementById("balance");
       if (b) b.textContent = r.ok ? r.data.balance : 0;
       setBalanceDebug(r, u);
+
+      // If we got fast fallback (0/?), try once more in background with a bit larger budget.
+      // This shouldn't block the UI, but can turn "stuck at 0" into a real chain balance.
+      try {
+        const c = getCreds();
+        const wantsAuth = hasWalletAuthCreds(c);
+        const src = r?.data?.source || "";
+        const balNum = Number(r?.data?.balance || 0);
+        if (wantsAuth && r?.ok && balNum === 0 && (src === "memory_fallback" || src === "memory")) {
+          if (!window.__snvr_balance_retry_inflight) {
+            window.__snvr_balance_retry_inflight = true;
+            void (async function () {
+              try {
+                const r2 = await api(
+                  "/wallet/balance",
+                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 15000 })
+                );
+                if (r2 && r2.ok && r2.data && Number(r2.data.balance || 0) > 0) {
+                  if (b) b.textContent = r2.data.balance;
+                }
+                setBalanceDebug(r2 || r, u);
+              } catch (_e) { /* ignore */ }
+              finally { window.__snvr_balance_retry_inflight = false; }
+            })();
+          }
+        }
+      } catch (_e) { /* ignore */ }
     }
     async function fetchWalletBalanceServerOnly(u) {
       const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
-        "&platform_user_id=" + encodeURIComponent(u.platform_user_id) + "&budget_ms=1500";
+        "&platform_user_id=" + encodeURIComponent(u.platform_user_id) + "&budget_ms=8000";
       return api(q);
     }
     async function fetchWalletBalanceWithFallback(u) {
       const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      primaryBody.budget_ms = 1500;
+      primaryBody.budget_ms = 8000;
       let r = await api("/wallet/balance", primaryBody);
       const authErr = r && !r.ok && (r.data?.error === "viewing_key_invalid" || r.data?.error === "permit_invalid");
       if (!authErr) return r;
@@ -1391,7 +1419,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const c = getCreds();
       if (c?.secret_address) setCreds(c.secret_address, "", null);
       else clearCreds();
-      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 1500 });
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 8000 });
     }
     function setBalanceDebug(resp, u) {
       const el = document.getElementById("balanceDebug");
