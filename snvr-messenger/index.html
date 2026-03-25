@@ -1159,8 +1159,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
       let res, text;
       try {
-        // /wallet/balance can include chain LCD probing; keep UI responsive but don't cut too aggressively.
-        var timeoutMs = path && String(path).indexOf("/wallet/balance") === 0 ? 16000 : 45000;
+        // /wallet/balance can include chain LCD probing; keep UI responsive.
+        // Use request budget_ms to decide how long we can wait (initial call is short; background retry can be longer).
+        var timeoutMs = 45000;
+        if (path && String(path).indexOf("/wallet/balance") === 0) {
+          var bm = body && typeof body === "object" ? Number(body.budget_ms) : NaN;
+          if (!Number.isFinite(bm) || bm <= 0) bm = 8000;
+          timeoutMs = Math.min(40000, Math.max(9000, Math.floor(bm * 1.3)));
+        }
         // Ensure Telegram WebView doesn't "hang" when backend chain query is slow.
         var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
         var timer = null;
@@ -1374,7 +1380,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!u) return;
       const r = await fetchWalletBalanceForUi(u);
       const b = document.getElementById("balance");
-      if (b) b.textContent = r.ok ? r.data.balance : 0;
+      if (b) {
+        if (r && r.ok && r.data) {
+          const src = String(r.data.source || "");
+          const auth = String(r.data.auth || "");
+          // Don't show misleading "0" when backend is still doing chain lookup.
+          if (src === "memory_fallback" && auth === "chain_slow") b.textContent = "...";
+          else b.textContent = r.data.balance;
+        } else {
+          b.textContent = 0;
+        }
+      }
       setBalanceDebug(r, u);
 
       // If we got fast fallback (0/?), try once more in background with a bit larger budget.
@@ -1391,10 +1407,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               try {
                 const r2 = await api(
                   "/wallet/balance",
-                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 15000 })
+                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 30000 })
                 );
-                if (r2 && r2.ok && r2.data && Number(r2.data.balance || 0) > 0) {
-                  if (b) b.textContent = r2.data.balance;
+                if (r2 && r2.ok && r2.data) {
+                  const src2 = String(r2.data.source || "");
+                  const bal2 = Number(r2.data.balance || 0);
+                  if (src2 === "chain" || bal2 > 0) {
+                    if (b) b.textContent = r2.data.balance;
+                  }
                 }
                 setBalanceDebug(r2 || r, u);
               } catch (_e) { /* ignore */ }
