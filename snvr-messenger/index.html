@@ -1018,9 +1018,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (timer) clearTimeout(timer);
       }
     }
-    const API_TIMEOUT_MS = Number(localStorage.getItem("snvr_api_timeout_ms") || "20000");
-    /** 백엔드 BALANCE_CHAIN_BUDGET_MS(기본 110s) + 여유 — 짧으면 체인 응답 전 브라우저가 먼저 끊김 */
-    const API_BALANCE_TIMEOUT_MS = Number(localStorage.getItem("snvr_api_balance_timeout_ms") || "130000");
     function tryAutoReturnAfterConnect() {
       var hint = document.getElementById("keplrOpenHint");
       if (hint) {
@@ -1161,24 +1158,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       let opt = { method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json" } };
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
       let res, text;
-      const timeoutMs = String(path || "").indexOf("/wallet/balance") === 0 ? API_BALANCE_TIMEOUT_MS : API_TIMEOUT_MS;
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(function () {
-          try { controller.abort(); } catch (_e) { /* ignore */ }
-        }, timeoutMs);
-        try {
-          res = await fetch(url, Object.assign({}, opt, { signal: controller.signal }));
-          text = await withTimeout(res.text(), Math.max(5000, timeoutMs), "RESPONSE_BODY_TIMEOUT");
-        } finally {
-          clearTimeout(timer);
-        }
+        res = await fetch(url, opt);
+        text = await res.text();
       } catch (e) {
-        const msg = String(e?.message || "");
-        if (msg.includes("AbortError") || msg.includes("aborted") || msg.includes("TIMEOUT")) {
-          return { ok: false, status: 0, data: { error: "Server timeout (" + timeoutMs + "ms). Try again. If repeated, reconnect Keplr and check backend logs." } };
-        }
-        return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + msg + ")" } };
+        return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (e.message || "") + ")" } };
       }
       let data = {};
       try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Server response is not JSON (status " + res.status + ")", raw: text.slice(0, 200) }; }
