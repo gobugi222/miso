@@ -605,7 +605,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <p id="keplrOpenHint" class="search-hint hidden" style="margin-top:6px;color:#f7b955;"></p>
           <p id="keplrStatus" class="search-hint hidden" style="margin-top:8px;"></p>
           <p id="keplrFlowStatus" class="search-hint" style="margin-top:4px;color:#58a6ff;">Flow status: idle</p>
-          <p class="search-hint" style="margin-top:2px;opacity:0.8;">Build: 2026-03-25-balance-fix-1</p>
+          <p class="search-hint" style="margin-top:2px;opacity:0.8;">Build: 2026-03-23-keplr-flow-2</p>
           <label style="margin-top:10px;display:block;">Your address (paste allowed)</label>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;">
             <input type="text" id="mySecretAddressInput" style="flex:1;min-width:140px;font-family:monospace;font-size:0.78rem;" placeholder="Paste secret1... address here if needed" />
@@ -1159,18 +1159,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (body && opt.method !== "GET") opt.body = JSON.stringify(body);
       let res, text;
       try {
-        // /wallet/balance can include LCD probe; don't cut too early in Telegram WebView.
-        var timeoutMs = path && String(path).indexOf("/wallet/balance") === 0 ? 45000 : 45000;
-        // Ensure Telegram WebView doesn't "hang" when backend chain query is slow.
-        var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-        var timer = null;
-        if (controller) timer = setTimeout(function () { try { controller.abort(); } catch (_e) { /* ignore */ } }, timeoutMs);
-        var fetchOpt = controller ? Object.assign({}, opt, { signal: controller.signal }) : opt;
-        res = await fetch(url, fetchOpt);
+        res = await fetch(url, opt);
         text = await res.text();
-        if (timer) clearTimeout(timer);
       } catch (e) {
-        try { if (controller && controller.signal && timer) clearTimeout(timer); } catch (_e2) { /* ignore */ }
         return { ok: false, status: 0, data: { error: "Cannot reach server. Check that the backend is running and the URL is correct. (Network: " + (e.message || "") + ")" } };
       }
       let data = {};
@@ -1325,56 +1316,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function fetchWalletBalanceForUi(u) {
       const c = getCreds();
       if (!hasWalletAuthCreds(c)) return fetchWalletBalanceServerOnly(u);
-      // Best-effort: query chain directly in the client (Zero-Log) to match *real wallet balance*
-      // even when backend LCD is slow/unreliable. Do it in background so UI stays instant.
-      try {
-        const cached = window.__snvr_last_client_chain_balance;
-        if (cached && cached.user_key === (u.platform + ":" + u.platform_user_id) && Date.now() - Number(cached.at || 0) < 30000) {
-          return { ok: true, status: 200, data: { balance: cached.balance, source: "client_chain_cache", auth: cached.auth || "permit" } };
-        }
-      } catch (_eCache) { /* ignore */ }
-      try {
-        if (!window.__snvr_client_chain_inflight) {
-          window.__snvr_client_chain_inflight = true;
-          void (async function () {
-            try {
-              const direct = await fetchWalletBalanceClientDirect(u, { timeout_ms: 20000 });
-              if (direct && direct.ok && direct.data) {
-                window.__snvr_last_client_chain_balance = {
-                  user_key: u.platform + ":" + u.platform_user_id,
-                  at: Date.now(),
-                  balance: Number(direct.data.balance || 0),
-                  auth: direct.data.auth || "permit",
-                };
-                // Update UI if still on same user.
-                const b = document.getElementById("balance");
-                if (b) b.textContent = String(direct.data.balance);
-                setBalanceDebug(direct, u);
-              }
-              window.__snvr_last_direct_chain_err = null;
-            } catch (eDirect) {
-              try { window.__snvr_last_direct_chain_err = String(eDirect && (eDirect.message || eDirect) || "client_chain_error"); } catch (_e2) { /* ignore */ }
-            } finally {
-              window.__snvr_client_chain_inflight = false;
-            }
-          })();
-        }
-      } catch (_eBg) { /* ignore */ }
-      // chain 조회가 느려도 UI가 멈추지 않게 backend 예산(budget_ms) 강제
-      var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      rBody.budget_ms = 1500;
-      let r = await api("/wallet/balance", rBody);
-      if (r && r.ok && r.data && String(r.data.source || "") !== "chain") {
-        const derr = window.__snvr_last_direct_chain_err;
-        if (derr) r.data.client_chain_error = String(derr).slice(0, 160);
-      }
+      let r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
       let hadAuthFallback = false;
       if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
         // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
-        var rBody2 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-        rBody2.budget_ms = 25000;
-        r = await api("/wallet/balance", rBody2);
+        r = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
         if (!r.ok && (r.data?.error === "permit_invalid" || r.data?.error === "viewing_key_invalid")) {
           hadAuthFallback = true;
           r = await fetchWalletBalanceServerOnly(u);
@@ -1391,16 +1338,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       // Self-heal: if still memory source while local permit exists, force server re-link once.
       if (r.ok && String(r.data?.source || "") === "memory") {
         const c2 = getCreds();
-        const botToggle = document.getElementById("botBalanceSyncToggle");
-        const botSyncWants = !!(botToggle && botToggle.checked);
-        // Privacy: 사용자가 bot-sync를 OFF로 두면 서버 저장/동기화 자동 수행하지 않음.
-        if (botSyncWants && c2?.secret_address && isPermitSessionValid(c2?.permit)) {
+        if (c2?.secret_address && isPermitSessionValid(c2?.permit)) {
           try {
             await syncServerWalletLink(c2.secret_address, "", c2.permit);
             await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
-            var rBody3 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-            rBody3.budget_ms = 25000;
-            const retry = await api("/wallet/balance", rBody3);
+            const retry = await api("/wallet/balance", bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }));
             if (retry?.ok) r = retry;
           } catch (_e) { /* ignore */ }
         }
@@ -1408,111 +1350,21 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (hadAuthFallback && r?.ok && r?.data && !r.data.auth) r.data.auth = "auth_fallback";
       return r;
     }
-
-    async function fetchWalletBalanceClientDirect(u, opt) {
-      const c = getCreds() || {};
-      if (!c.secret_address) return null;
-      if (!isPermitSessionValid(c.permit) && !c.viewing_key) return null;
-      // Need token contract + code hash from backend chain-config (fast) or defaults.
-      const cfgR = await api("/wallet/chain-config");
-      const d = cfgR && cfgR.data ? cfgR.data : (cfgR || {});
-      const chainId = d.chain_id || DEFAULT_CHAIN_ID;
-      const lcdUrl = d.lcd_url || "https://lcd.secret.express";
-      const snvrAddr = d.snvr_address || DEFAULT_SNVR_CONTRACT;
-      const snvrCodeHash = d.snvr_code_hash || DEFAULT_SNVR_CODE_HASH;
-      if (!snvrAddr || !snvrCodeHash) return null;
-
-      const SecretNetworkClient = await loadSecretJsClientCtor();
-      // Secret Network queries also require encryption utils. Use Keplr's Enigma utils.
-      const keplr = window.keplr;
-      if (!keplr || !keplr.getEnigmaUtils) return null;
-      try { await withTimeout(keplr.enable(chainId), 12000, "KEPLR_ENABLE_FOR_QUERY_TIMEOUT"); } catch (_eEnable) { /* ignore */ }
-      const enigmaUtils = keplr.getEnigmaUtils(chainId);
-      // Query-only client (no signing). Permit/viewing-key auth happens in the query payload.
-      const client = new SecretNetworkClient({ url: lcdUrl, chainId, encryptionUtils: enigmaUtils });
-
-      const doQuery = async function () {
-        if (isPermitSessionValid(c.permit)) {
-          const r1 = await client.query.snip20.getBalance({
-            contract: { address: snvrAddr, code_hash: snvrCodeHash },
-            address: String(c.secret_address).trim(),
-            auth: { permit: c.permit },
-          });
-          return r1?.balance?.amount ?? "0";
-        }
-        const r2 = await client.query.snip20.getBalance({
-          contract: { address: snvrAddr, code_hash: snvrCodeHash },
-          address: String(c.secret_address).trim(),
-          auth: { key: String(c.viewing_key || "").trim() },
-        });
-        return r2?.balance?.amount ?? "0";
-      };
-
-      // Hard upper bound so UI never hangs on client LCD either.
-      const tms = opt && Number(opt.timeout_ms) ? Number(opt.timeout_ms) : 7000;
-      const amountRaw = await withTimeout(doQuery(), tms, "CLIENT_CHAIN_BAL_TIMEOUT");
-      const human = Number(amountRaw) / 1e9;
-      if (!Number.isFinite(human) || human < 0) return null;
-      return { ok: true, status: 200, data: { balance: human, source: "client_chain", auth: isPermitSessionValid(c.permit) ? "permit" : "viewing_key" } };
-    }
     async function refreshBalance() {
       const u = getUser();
       if (!u) return;
       const r = await fetchWalletBalanceForUi(u);
       const b = document.getElementById("balance");
-      if (b) {
-        if (r && r.ok && r.data) {
-          const src = String(r.data.source || "");
-          const auth = String(r.data.auth || "");
-          const wantsAuth = hasWalletAuthCreds(getCreds());
-          // Don't show misleading "0" when we still have valid permit/viewing key but backend fell back.
-          if ((src === "memory_fallback" && auth === "chain_slow") || (src === "memory" && wantsAuth)) b.textContent = "...";
-          else b.textContent = r.data.balance;
-        } else {
-          b.textContent = 0;
-        }
-      }
+      if (b) b.textContent = r.ok ? r.data.balance : "?";
       setBalanceDebug(r, u);
-
-      // If we got fast fallback (0/?), try once more in background with a bit larger budget.
-      // This shouldn't block the UI, but can turn "stuck at 0" into a real chain balance.
-      try {
-        const c = getCreds();
-        const wantsAuth = hasWalletAuthCreds(c);
-        const src = r?.data?.source || "";
-        const balNum = Number(r?.data?.balance || 0);
-        if (wantsAuth && r?.ok && balNum === 0 && (src === "memory_fallback" || src === "memory")) {
-          if (!window.__snvr_balance_retry_inflight) {
-            window.__snvr_balance_retry_inflight = true;
-            void (async function () {
-              try {
-                const r2 = await api(
-                  "/wallet/balance",
-                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 50000 })
-                );
-                if (r2 && r2.ok && r2.data) {
-                  const src2 = String(r2.data.source || "");
-                  // Avoid overwriting with memory_fallback=0 after delay.
-                  if (src2 === "chain") {
-                    if (b) b.textContent = r2.data.balance;
-                    setBalanceDebug(r2, u);
-                  }
-                }
-              } catch (_e) { /* ignore */ }
-              finally { window.__snvr_balance_retry_inflight = false; }
-            })();
-          }
-        }
-      } catch (_e) { /* ignore */ }
     }
     async function fetchWalletBalanceServerOnly(u) {
       const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
-        "&platform_user_id=" + encodeURIComponent(u.platform_user_id) + "&budget_ms=25000";
+        "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
       return api(q);
     }
     async function fetchWalletBalanceWithFallback(u) {
       const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      primaryBody.budget_ms = 25000;
       let r = await api("/wallet/balance", primaryBody);
       const authErr = r && !r.ok && (r.data?.error === "viewing_key_invalid" || r.data?.error === "permit_invalid");
       if (!authErr) return r;
@@ -1520,7 +1372,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const c = getCreds();
       if (c?.secret_address) setCreds(c.secret_address, "", null);
       else clearCreds();
-      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 25000 });
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id });
     }
     function setBalanceDebug(resp, u) {
       const el = document.getElementById("balanceDebug");
@@ -1533,10 +1385,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const addr = String(c.secret_address || "").trim();
       const shortAddr = addr ? maskSecretAddress(addr) : "-";
       const hasPermit = isPermitSessionValid(c.permit) ? "yes" : "no";
-      const directErr = resp?.data?.client_chain_error || window.__snvr_last_direct_chain_err || "";
-      const derrHint = directErr ? (" | client_chain_err=" + String(directErr).slice(0, 90)) : "";
+      const pd = resp?.data?.permit_debug;
+      const pdHint = pd && typeof pd === "object" && pd.ok === false
+        ? (" | err=" + String(pd.error_code || pd.reason || "") + (Array.isArray(pd.errors) && pd.errors[0] ? (": " + String(pd.errors[0]).slice(0, 120)) : ""))
+        : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + derrHint;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " permit=" + hasPermit + pdHint;
     }
 
     function profileAvatarUrl() {
@@ -1557,9 +1411,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (avatarEl) avatarEl.src = "snvr-messenger-logo.png?v=3";
         return;
       }
-      // Snapshot creds at call time to avoid delayed UI overwrites with stale "memory=0".
-      const credsSnapshot = getCreds();
-      const wantsAuth = hasWalletAuthCreds(credsSnapshot);
       if (userEl) userEl.textContent = u.platform + ":" + u.platform_user_id;
       Promise.all([
         api("/profile?platform=" + u.platform + "&platform_user_id=" + encodeURIComponent(u.platform_user_id)),
@@ -1567,22 +1418,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       ]).then(function (results) {
         const profileR = results[0];
         const balanceR = results[1];
-        // If we still have a valid local permit/viewing key but backend returned source=memory (0),
-        // do not overwrite sidebar with that misleading value.
-        const src = String(balanceR?.data?.source || "");
-        if (wantsAuth && balanceR?.ok && (src === "memory" || src === "" || src === "memory_fallback")) {
-          // Still update debug, but avoid overwriting the visible sidebar number.
-          setBalanceDebug(balanceR, u);
+        let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
+        const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
+        if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
+          if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
         } else {
-          let balance = (balanceR.ok && balanceR.data && balanceR.data.balance != null) ? Number(balanceR.data.balance) : 0;
-          const statusText = (profileR.ok && profileR.data && profileR.data.status_text) ? profileR.data.status_text.trim() : "";
-          if (!balanceR.ok && (balanceR.data?.error === "viewing_key_invalid" || balanceR.data?.error === "permit_invalid")) {
-            if (balanceEl) { balanceEl.textContent = "Auth expired — open ⚙️ Settings → Connect Keplr"; balanceEl.style.color = "#f85149"; }
-          } else {
-            if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
-          }
-          setBalanceDebug(balanceR, u);
+          if (balanceEl) { balanceEl.textContent = "Balance " + balance + " SNVR" + (statusText ? " (" + statusText + ")" : ""); balanceEl.style.color = ""; }
         }
+        setBalanceDebug(balanceR, u);
         if (profileR.ok && profileR.data) {
           if (nameEl) nameEl.textContent = (profileR.data.display_name && profileR.data.display_name.trim()) ? profileR.data.display_name.trim() : "SNVR Messenger";
           if (avatarEl) {
@@ -1950,30 +1793,25 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         } else {
           setCreds(secretAddress, "", permit);
           if (permit) {
-            const botToggle = document.getElementById("botBalanceSyncToggle");
-            const botSyncWants = !!(botToggle && botToggle.checked);
-            // Privacy: bot-sync 토글이 OFF면 서버 저장/동기화를 자동으로 하지 않는다.
-            if (botSyncWants) {
-              let linkR = await syncServerWalletLink(secretAddress, "", permit);
-              if (!linkR.ok && !linkR.skipped) {
-                linkR = await syncServerWalletLink(secretAddress, "", permit);
-              }
-              if (!linkR.ok && !linkR.skipped) {
-                statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
-                statusEl.className = "error";
-                setKeplrFlowStatus("error_server_link_sync");
-                return;
-              }
-              // Verify server side really has wallet auth after connect.
-              const verifyR = await api(
-                "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
-                "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
-              );
-              if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
-                // One more forced sync before continuing.
-                await syncServerWalletLink(secretAddress, "", permit);
-                await enableBotBalanceSyncOnServer(secretAddress, "", permit);
-              }
+            let linkR = await syncServerWalletLink(secretAddress, "", permit);
+            if (!linkR.ok && !linkR.skipped) {
+              linkR = await syncServerWalletLink(secretAddress, "", permit);
+            }
+            if (!linkR.ok && !linkR.skipped) {
+              statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
+              statusEl.className = "error";
+              setKeplrFlowStatus("error_server_link_sync");
+              return;
+            }
+            // Verify server side really has wallet auth after connect.
+            const verifyR = await api(
+              "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
+              "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
+            );
+            if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
+              // One more forced sync before continuing.
+              await syncServerWalletLink(secretAddress, "", permit);
+              await enableBotBalanceSyncOnServer(secretAddress, "", permit);
             }
           }
           statusEl.textContent = "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready)";
@@ -1986,9 +1824,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        const botToggle2 = document.getElementById("botBalanceSyncToggle");
-        const botSyncWants2 = !!(botToggle2 && botToggle2.checked);
-        if (permit && botSyncWants2) await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+        if (permit) await enableBotBalanceSyncOnServer(secretAddress, "", permit);
         refreshProfileSidebar();
         tryAutoReturnAfterConnect();
       } catch (e) {
@@ -2830,7 +2666,18 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const addr = String(r.data?.secret_address || c.secret_address || "").trim();
         const permit = r.data?.permit || c.permit || null;
         if (addr && permit) setCreds(addr, "", permit);
-        // Privacy: 사용자가 OFF로 둔 상태면 절대 자동으로 bot-sync를 켜지지 않게 한다.
+        // If user already has permit session, turn bot sync ON automatically (no manual checkbox tap).
+        if (addr && permit && !r.data?.enabled) {
+          const autoOnR = await api("/wallet/bot-balance-sync", {
+            platform: u.platform,
+            platform_user_id: u.platform_user_id,
+            enabled: true,
+            secret_address: addr,
+            viewing_key: "",
+            permit: permit,
+          });
+          if (autoOnR.ok) toggle.checked = true;
+        }
       } catch (_e) { /* ignore */ }
       status.className = "search-hint";
       status.textContent = (r.data.enabled || r.data.has_secret_link)
