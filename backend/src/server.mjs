@@ -1399,15 +1399,104 @@ app.post("/swap", async (req, res) => {
   return res.status(501).json({ ok: false, error: err(loc, "chain_not_configured") });
 });
 
-// POST /mix — deprecated server-side routing path.
-// Privacy Routing is now client-signed in messenger (Deposit -> Claim).
+// POST /mix — Privacy Routing. 보낸 금액에서 수수료 1% 차감, 나머지가 수령인에게 입금
 app.post("/mix", async (req, res) => {
-  return res.status(410).json({
-    ok: false,
-    error: "routing_moved_to_client",
-    message:
-      "Privacy Routing is client-signed now. Use SNVR Messenger: Deposit to Relay Pool -> Claim (Recommended or Instant).",
-  });
+  const { amount, recipient, platform = "telegram", from_platform_user_id, secret_address, viewing_key, permit: rawPermit } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
+  const loc = getLocale(req, from_platform_user_id != null ? platformKey(platform, from_platform_user_id) : null);
+  if (amount == null || amount <= 0 || !recipient) {
+    return res.status(400).json({ ok: false, error: err(loc, "amount_recipient_required") });
+  }
+  const numAmount = Number(amount);
+  const fee = numAmount * MIX_FEE_RATE;
+  const toReceive = numAmount - fee;
+
+  const fromKey = from_platform_user_id != null ? platformKey(platform, from_platform_user_id) : null;
+  const fromU = from_platform_user_id != null ? ensureUser(platform, from_platform_user_id) : null;
+
+  if (USE_SECRET && process.env.MNEMONIC) {
+    const toAddr = resolveRecipientToSecretAddress(recipient, users);
+    if (toAddr) {
+      let effective;
+      try {
+        effective = (secret_address && (viewing_key || permit))
+          ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+          : (fromU ? await getEffectiveBalance(fromU) : 0);
+      } catch (e) {
+        if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+        if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+        if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+        throw e;
+      }
+      if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
+      if (fromU) fromU.balance = effective;
+      const amountRaw = String(Math.floor(toReceive * 1e9));
+      const result = await sendSnvr(toAddr, amountRaw);
+      if (result.ok) {
+        if (fromU) fromU.balance -= numAmount;
+        const toKey = resolveRecipientToUserKey(recipient, platform);
+        if (toKey && toKey !== fromKey) {
+          const [p, id] = toKey.split(":");
+          ensureUser(p, id).balance += toReceive;
+          walletTxs.push({
+            id: walletTxId++,
+            type: "mix",
+            from_key: fromKey,
+            to_key: toKey,
+            amount: numAmount,
+            fee,
+            meta: { recipient, txHash: result.txHash },
+            created_at: new Date().toISOString(),
+          });
+        }
+        saveDb();
+        return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive });
+      }
+      return res.status(400).json({ ok: false, error: result.error });
+    }
+  }
+
+  if (from_platform_user_id != null) {
+    let effective;
+    try {
+      effective = (secret_address && (viewing_key || permit))
+        ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+        : await getEffectiveBalance(fromU);
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      throw e;
+    }
+    if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
+    fromU.balance = effective;
+    fromU.balance -= numAmount;
+    const toKey = resolveRecipientToUserKey(recipient, platform);
+    if (toKey && toKey !== fromKey) {
+      const [p, id] = toKey.split(":");
+      ensureUser(p, id).balance += toReceive;
+      walletTxs.push({
+        id: walletTxId++,
+        type: "mix",
+        from_key: fromKey,
+        to_key: toKey,
+        amount: numAmount,
+        fee,
+        meta: { recipient },
+        created_at: new Date().toISOString(),
+      });
+    }
+    saveDb();
+  }
+
+  if (MOCK) {
+    saveDb();
+    return res.json({ ok: true, txHash: `mock-mix-${Date.now()}`, fee, to_receive: toReceive });
+  }
+  if (USE_SECRET) {
+    return res.status(400).json({ ok: false, error: err(loc, "recipient_must_be_secret") });
+  }
+  return res.status(501).json({ ok: false, error: err(loc, "chain_not_configured") });
 });
 
 // 테스트용 잔액 (개발 시에만 사용)
