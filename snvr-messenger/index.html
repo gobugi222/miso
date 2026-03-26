@@ -1868,7 +1868,15 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         } else {
           // If Keplr already has a viewing key for this SNIP-20, pull it automatically.
           // This avoids manual copy/paste on mobile, while still keeping permit for fallback/bot sync.
-          const autoVk = await tryGetViewingKeyFromKeplr(keplr, chainId, snvrAddr);
+          const autoVk = await ensureViewingKeyNoCopy(
+            keplr,
+            chainId,
+            lcdUrl,
+            signer,
+            secretAddress,
+            snvrAddr,
+            codeHash
+          );
           setCreds(secretAddress, autoVk || "", permit);
           if (permit) {
             const botToggle = document.getElementById("botBalanceSyncToggle");
@@ -2146,6 +2154,36 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const k = await keplr.getSecret20ViewingKey(chainId, tokenAddress);
         return String(k || "").trim();
       } catch (_e) {
+        return "";
+      }
+    }
+    async function ensureViewingKeyNoCopy(keplr, chainId, lcdUrl, signer, secretAddress, tokenAddress, codeHash) {
+      var key = await tryGetViewingKeyFromKeplr(keplr, chainId, tokenAddress);
+      if (key) return key;
+      try {
+        var rand = crypto.getRandomValues(new Uint8Array(24));
+        var generated = "snvr_" + btoa(String.fromCharCode.apply(null, rand)).replace(/=+$/g, "");
+        var enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
+        var SecretNetworkClient = await loadSecretJsClientCtor();
+        var client = new SecretNetworkClient({
+          url: lcdUrl,
+          chainId: chainId,
+          wallet: signer,
+          walletAddress: secretAddress,
+          encryptionUtils: enigmaUtils || undefined,
+        });
+        await withTimeout(
+          client.tx.snip20.setViewingKey({
+            sender: secretAddress,
+            contract_address: tokenAddress,
+            code_hash: codeHash,
+            msg: { set_viewing_key: { key: generated } },
+          }, { gasLimit: 220000 }),
+          45000,
+          "SET_VIEWING_KEY_TIMEOUT"
+        );
+        return generated;
+      } catch (_e2) {
         return "";
       }
     }
