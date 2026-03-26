@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-12";
+    const SNVR_UI_BUILD = "2026-03-27-13";
 
     const I18N = {
       en: {
@@ -1277,13 +1277,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const u = getSessionUser();
       if (!u || !secretAddress) return { ok: false, skipped: true };
       const creds = getCreds();
+      const vk = String(viewingKey !== undefined ? viewingKey : (creds?.viewing_key || "")).trim();
       const p = permit !== undefined ? permit : creds?.permit || null;
       if (!p) return { ok: false, skipped: true };
       return api("/wallet/link-secret", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         secret_address: secretAddress,
-        viewing_key: "",
+        viewing_key: vk,
         permit: p || null,
       });
     }
@@ -1298,7 +1299,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         platform_user_id: u.platform_user_id,
         enabled: true,
         secret_address: c.secret_address,
-        viewing_key: "",
+        viewing_key: String(c.viewing_key || "").trim(),
         permit: c.permit,
       });
       return !!onR.ok;
@@ -1311,10 +1312,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const syncR = await api("/wallet/bot-balance-sync?" + q);
       if (!syncR.ok) return;
       const addr = String(syncR.data?.secret_address || "").trim();
+      const vk = String(syncR.data?.viewing_key || prev.viewing_key || "").trim();
       const permitFromServer = syncR.data?.permit || null;
       const linked = !!(syncR.data?.has_secret_link || syncR.data?.enabled);
       if (addr && permitFromServer) {
-        setCreds(addr, "", permitFromServer);
+        setCreds(addr, vk, permitFromServer);
         return;
       }
       if (!linked || (!addr && !permitFromServer)) {
@@ -1990,8 +1992,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           // Keplr 연결 성공 시 항상 서버 링크 + 봇 on-chain 동기화 ON (체크박스 수동을 없앰).
           // 텔레그램 WebView ↔ Keplr 브라우저는 localStorage가 달라, 서버 동기화 없으면 한쪽만 잔액 0.
           if (permit) {
-            let linkR = await syncServerWalletLink(secretAddress, "", permit);
-            if (!linkR.ok && !linkR.skipped) linkR = await syncServerWalletLink(secretAddress, "", permit);
+            let linkR = await syncServerWalletLink(secretAddress, autoVk || "", permit);
+            if (!linkR.ok && !linkR.skipped) linkR = await syncServerWalletLink(secretAddress, autoVk || "", permit);
             if (!linkR.ok && !linkR.skipped) {
               statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
               statusEl.className = "error";
@@ -2003,9 +2005,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
             );
             if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
-              await syncServerWalletLink(secretAddress, "", permit);
+              await syncServerWalletLink(secretAddress, autoVk || "", permit);
             }
-            await enableBotBalanceSyncOnServer(secretAddress, "", permit);
+            await enableBotBalanceSyncOnServer(secretAddress, autoVk || "", permit);
           }
           statusEl.textContent =
             "Saved locally (Zero-Log)! " +
@@ -2900,8 +2902,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       try {
         const c = getCreds() || {};
         const addr = String(r.data?.secret_address || c.secret_address || "").trim();
+        const vk = String(r.data?.viewing_key || c.viewing_key || "").trim();
         const permit = r.data?.permit || c.permit || null;
-        if (addr && permit) setCreds(addr, "", permit);
+        if (addr && permit) setCreds(addr, vk, permit);
         // Privacy: 사용자가 OFF로 둔 상태면 절대 자동으로 bot-sync를 켜지지 않게 한다.
       } catch (_e) { /* ignore */ }
       status.className = "search-hint";
@@ -2916,13 +2919,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const status = document.getElementById("botBalanceSyncStatus");
       if (!u || !secretAddress) return;
       const c = getCreds();
+      const vk = String(viewingKey !== undefined ? viewingKey : (c?.viewing_key || "")).trim();
       const p = permit !== undefined ? permit : (c?.permit || null);
       const r = await api("/wallet/bot-balance-sync", {
         platform: u.platform,
         platform_user_id: u.platform_user_id,
         enabled: true,
         secret_address: secretAddress,
-        viewing_key: "",
+        viewing_key: vk,
         permit: p || null,
       });
       if (toggle) toggle.checked = !!r.ok;
