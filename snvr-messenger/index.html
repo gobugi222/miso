@@ -668,7 +668,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           </p>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="botBalanceSyncToggle" style="width:auto;" />
-            Sync balance with bot (auto on after wallet connect)
+            Bot on-chain sync (auto-ON after Connect Keplr; turn OFF only to stop server copy)
           </label>
           <p id="botBalanceSyncStatus" class="search-hint" style="margin-top:8px;">Loading...</p>
         </div>
@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-03";
+    const SNVR_UI_BUILD = "2026-03-27-04";
 
     const I18N = {
       en: {
@@ -1371,10 +1371,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       // Self-heal: if still memory source while local permit exists, force server re-link once.
       if (r.ok && String(r.data?.source || "") === "memory") {
         const c2 = getCreds();
-        const botToggle = document.getElementById("botBalanceSyncToggle");
-        const botSyncWants = !!(botToggle && botToggle.checked);
-        // Privacy: 사용자가 bot-sync를 OFF로 두면 서버 저장/동기화 자동 수행하지 않음.
-        if (botSyncWants && c2?.secret_address && isPermitSessionValid(c2?.permit)) {
+        if (c2?.secret_address && isPermitSessionValid(c2?.permit)) {
           try {
             await syncServerWalletLink(c2.secret_address, "", c2.permit);
             await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
@@ -1825,14 +1822,19 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         }
         const keplr = window.keplr;
         if (!keplr) {
-          statusEl.textContent = isMobile
-            ? "현재 브라우저에서는 Keplr가 감지되지 않습니다. (텔레그램/일반 모바일 브라우저 제한) 아래 'Mobile manual link'에 secret 주소만 입력하거나, Keplr dApp 브라우저에서 다시 시도하세요."
-            : "Please install Keplr extension: https://www.keplr.app";
+          if (isMobile) {
+            statusEl.className = "search-hint";
+            statusEl.textContent =
+              "Keplr 앱 브라우저로 이동합니다. 지갑 잠금 해제 후 이 페이지에서 자동으로 연결이 이어집니다. (텔레그램 미니앱과 Keplr 브라우저는 저장소가 달라 연결 후 서버 동기화로 맞춥니다.)";
+            setKeplrFlowStatus("redirect_keplr_mobile");
+            try { localStorage.setItem(KEPLR_PENDING_KEY, "1"); } catch (_e) { /* ignore */ }
+            try {
+              window.location.href = buildKeplrWebBrowserDeeplink();
+            } catch (_e2) { /* ignore */ }
+            return;
+          }
+          statusEl.textContent = "Please install Keplr extension: https://www.keplr.app";
           statusEl.className = "error";
-          try {
-            var manual = document.getElementById("manualSecretAddress");
-            if (manual) manual.focus();
-          } catch (_e) { /* ignore */ }
           return;
         }
         const chainId = cfg.data.chain_id;
@@ -1898,32 +1900,25 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             codeHash
           );
           setCreds(secretAddress, autoVk || "", permit);
+          // Keplr 연결 성공 시 항상 서버 링크 + 봇 on-chain 동기화 ON (체크박스 수동을 없앰).
+          // 텔레그램 WebView ↔ Keplr 브라우저는 localStorage가 달라, 서버 동기화 없으면 한쪽만 잔액 0.
           if (permit) {
-            const botToggle = document.getElementById("botBalanceSyncToggle");
-            const botSyncWants = !!(botToggle && botToggle.checked);
-            // Privacy: bot-sync 토글이 OFF면 서버 저장/동기화를 자동으로 하지 않는다.
-            if (botSyncWants) {
-              let linkR = await syncServerWalletLink(secretAddress, "", permit);
-              if (!linkR.ok && !linkR.skipped) {
-                linkR = await syncServerWalletLink(secretAddress, "", permit);
-              }
-              if (!linkR.ok && !linkR.skipped) {
-                statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
-                statusEl.className = "error";
-                setKeplrFlowStatus("error_server_link_sync");
-                return;
-              }
-              // Verify server side really has wallet auth after connect.
-              const verifyR = await api(
-                "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
-                "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
-              );
-              if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
-                // One more forced sync before continuing.
-                await syncServerWalletLink(secretAddress, "", permit);
-                await enableBotBalanceSyncOnServer(secretAddress, "", permit);
-              }
+            let linkR = await syncServerWalletLink(secretAddress, "", permit);
+            if (!linkR.ok && !linkR.skipped) linkR = await syncServerWalletLink(secretAddress, "", permit);
+            if (!linkR.ok && !linkR.skipped) {
+              statusEl.textContent = "Connected, but server wallet link sync failed. Retry Connect Keplr once.";
+              statusEl.className = "error";
+              setKeplrFlowStatus("error_server_link_sync");
+              return;
             }
+            const verifyR = await api(
+              "/wallet/bot-balance-sync?platform=" + encodeURIComponent(u.platform) +
+              "&platform_user_id=" + encodeURIComponent(u.platform_user_id)
+            );
+            if (!(verifyR.ok && (verifyR.data?.has_secret_link || verifyR.data?.enabled))) {
+              await syncServerWalletLink(secretAddress, "", permit);
+            }
+            await enableBotBalanceSyncOnServer(secretAddress, "", permit);
           }
           statusEl.textContent =
             "Saved locally (Zero-Log)! " +
@@ -1940,9 +1935,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
         loadViewingKey();
         refreshWalletLinkStatusUi();
-        const botToggle2 = document.getElementById("botBalanceSyncToggle");
-        const botSyncWants2 = !!(botToggle2 && botToggle2.checked);
-        if (permit && botSyncWants2) await enableBotBalanceSyncOnServer(secretAddress, "", permit);
         refreshProfileSidebar();
         tryAutoReturnAfterConnect();
       } catch (e) {
