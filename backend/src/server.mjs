@@ -1347,4 +1347,5 @@ app.listen(PORT, () => {
   }
   if (TELEGRAM_BOT_TOKEN) console.log("  [송금알림] 텔레그램 봇 토큰 로드됨 → 입금 시 텔레그램 알림 전송 가능");
   else console.warn("  [송금알림] TELEGRAM_BOT_TOKEN 없음 → backend/.env 또는 telegram-bot/.env의 BOT_TOKEN 필요");
+  
 });
