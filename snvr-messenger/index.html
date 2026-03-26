@@ -463,6 +463,7 @@
           <button type="button" id="btnMixRefreshPending" class="secondary" style="width:auto;margin-top:6px;padding:6px 12px;font-size:0.85rem;">
             Refresh chain status
           </button>
+          <p id="mixClaimTarget" class="search-hint" style="margin-top:8px;"></p>
           <div id="mixTicketList" class="search-hint" style="margin-top:8px;"></div>
           <p id="mixResult" class="hidden"></p>
         </div>
@@ -712,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-17";
+    const SNVR_UI_BUILD = "2026-03-27-19";
 
     const I18N = {
       en: {
@@ -2231,18 +2232,46 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
     function renderTicketList() {
       const el = document.getElementById("mixTicketList");
+      const targetEl = document.getElementById("mixClaimTarget");
       if (!el) return;
       const arr = getRoutingTickets();
       if (!arr.length) {
         el.textContent = "Local routing tickets: none";
+        if (targetEl) targetEl.textContent = "Claim target: none (deposit first).";
         return;
       }
+      const toHuman = (raw) => {
+        const n = Number(raw || 0);
+        if (!Number.isFinite(n) || n <= 0) return "0";
+        return String(n / 1e9);
+      };
+      const ageMin = (createdAt) => {
+        const ts = Number(createdAt || 0);
+        if (!Number.isFinite(ts) || ts <= 0) return 0;
+        return Math.max(0, Math.floor((Date.now() - ts) / 60000));
+      };
+      const pending = arr.filter((t) => !t.claimed);
+      const claimed = arr.filter((t) => !!t.claimed);
+      const pendingTotalRaw = pending.reduce((acc, t) => acc + Number(t.amount_raw || 0), 0);
+      const claimTarget = pending.length ? pending[0] : null;
+      if (targetEl) {
+        if (claimTarget) {
+          const at = new Date(Number(claimTarget.created_at || Date.now())).toLocaleString();
+          targetEl.textContent =
+            `Claim target now: ${toHuman(claimTarget.amount_raw)} SNVR (oldest pending, created ${at}, ${ageMin(claimTarget.created_at)} min ago)`;
+        } else {
+          targetEl.textContent = "Claim target: none (all local tickets already claimed).";
+        }
+      }
       const rows = arr.slice(0, 5).map((t, i) => {
-        const dt = new Date(Number(t.created_at || Date.now())).toLocaleTimeString();
+        const dt = new Date(Number(t.created_at || Date.now())).toLocaleString();
+        const minsAgo = ageMin(t.created_at);
         const st = t.claimed ? "claimed" : "pending";
-        return `${i + 1}) ${t.amount_raw} raw | ${st} | ${dt}`;
+        return `${i + 1}) ${toHuman(t.amount_raw)} SNVR | ${st} | ${dt} (${minsAgo} min ago)`;
       });
-      el.textContent = "Local routing tickets:\n" + rows.join("\n");
+      el.textContent =
+        `Local routing tickets: total=${arr.length}, pending=${pending.length}, claimed=${claimed.length}, pending_total=${toHuman(pendingTotalRaw)} SNVR\n` +
+        rows.join("\n");
     }
     function humanToRaw(amount, decimals) {
       const n = Number(amount);
@@ -2494,7 +2523,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (claimed) markTicketClaimed(ticket.ticket_hash);
         renderTicketList();
       } catch (_e) {
-        el.textContent = "Pending: unavailable (check network/LCD or Keplr)";
+        const arr = getRoutingTickets();
+        const pendingCount = arr.filter((t) => !t.claimed).length;
+        el.textContent = pendingCount > 0
+          ? `Pending: chain status unavailable now (network/LCD/Keplr). Local pending tickets: ${pendingCount}. You can still claim by amount from local ticket list below.`
+          : "Pending: chain status unavailable now (network/LCD/Keplr).";
         renderTicketList();
       }
     }
