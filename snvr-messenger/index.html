@@ -993,22 +993,18 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       return /Telegram/i.test(ua) || !!(window.Telegram && window.Telegram.WebApp);
     }
     function buildKeplrWebBrowserDeeplink() {
-      var target = "https://app.snvr.org";
+      var target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
       try {
-        if (/^https?:/i.test(location.href)) {
-          var u = new URL(location.href);
-          u.searchParams.set("view", "settings");
-          u.searchParams.set("keplr_autoconnect", "1");
-          var cur = getSessionUser();
-          if (cur && cur.platform && cur.platform_user_id != null) {
-            u.searchParams.set("platform", String(cur.platform));
-            u.searchParams.set("platform_user_id", String(cur.platform_user_id));
-          }
-          u.searchParams.set("api", getApiUrl());
-          target = u.toString();
-        } else {
-          target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
+        var u = new URL("https://app.snvr.org/");
+        u.searchParams.set("view", "settings");
+        u.searchParams.set("keplr_autoconnect", "1");
+        var cur = getSessionUser();
+        if (cur && cur.platform && cur.platform_user_id != null) {
+          u.searchParams.set("platform", String(cur.platform));
+          u.searchParams.set("platform_user_id", String(cur.platform_user_id));
         }
+        u.searchParams.set("api", getApiUrl());
+        target = u.toString();
       } catch (_e) {
         target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
       }
