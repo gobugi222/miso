@@ -1455,8 +1455,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const hasPermit = isPermitSessionValid(c.permit) ? "yes" : "no";
       const hasVk = String(c.viewing_key || "").trim() ? "yes" : "no";
       const via = resp?.data?.balance_via ? " via=" + String(resp.data.balance_via) : "";
+      const ce = resp?.data?.chain_error ? " ce=" + String(resp.data.chain_error) : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " vk=" + hasVk + " permit=" + hasPermit + via;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " vk=" + hasVk + " permit=" + hasPermit + via + ce;
     }
 
     function profileAvatarUrl() {
