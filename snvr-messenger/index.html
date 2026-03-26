@@ -664,11 +664,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <h3 class="view-title" style="font-size:1rem">🤖 Bot balance sync</h3>
           <p class="search-hint" style="margin-top:0;">
             <strong>Auto:</strong> When you finish <strong>Connect Keplr</strong> (permit / viewing key), this turns <strong>ON</strong> so Telegram <code>/balance</code>, send, swap can use your on-chain balance <strong>without opening the messenger again</strong>.<br />
-            OFF: remove from server (Zero-Log); bot shows app balance only
+            OFF: server-stored wallet data (<code>secret_address</code>, <code>permit</code>, <code>viewing_key</code>) is deleted immediately. To use on-chain again, reconnect and re-approve.
           </p>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="botBalanceSyncToggle" style="width:auto;" />
-            Bot on-chain sync (auto-ON after Connect Keplr; turn OFF only to stop server copy)
+            Bot on-chain sync (auto-ON after Connect Keplr; OFF = auto-delete server wallet data)
           </label>
           <p id="botBalanceSyncStatus" class="search-hint" style="margin-top:8px;">Loading...</p>
         </div>
@@ -712,7 +712,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-15";
+    const SNVR_UI_BUILD = "2026-03-27-16";
 
     const I18N = {
       en: {
@@ -2919,7 +2919,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       status.className = "search-hint";
       status.textContent = (r.data.enabled || r.data.has_secret_link)
         ? "Current: ON (bot /balance uses on-chain)"
-        : "Current: OFF (bot /balance uses app balance)";
+        : "Current: OFF (server wallet data deleted; reconnect + approve required)";
     }
     /** After Keplr/permit success: enable Telegram bot on-chain sync without asking the user to tick the box. */
     async function enableBotBalanceSyncOnServer(secretAddress, viewingKey, permit) {
@@ -3266,7 +3266,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const creds = getCreds();
       if (this.checked && !(creds && creds.secret_address && creds.permit)) {
         this.checked = false;
-        status.textContent = "Permit session is required for bot on-chain sync. Reconnect Keplr first.";
+        status.textContent = "Permit session is required. Reconnect Keplr and approve again.";
         status.className = "error";
         return;
       }
@@ -3287,8 +3287,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return;
       }
       status.textContent = this.checked
-        ? "Current: ON (bot /balance uses on-chain)"
-        : "Current: OFF (bot /balance uses app balance)";
+        ? "Current: ON (temporary server copy enabled for convenience)"
+        : "Current: OFF (server wallet data deleted; reconnect + approve required)";
       status.className = "success";
     };
 
