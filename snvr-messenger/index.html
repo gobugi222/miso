@@ -712,6 +712,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LAST_DASHBOARD_VIEW_KEY = "snvr_last_dashboard_view";
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
+    /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
+    const SNVR_UI_BUILD = "2026-03-27-01";
 
     const I18N = {
       en: {
@@ -1457,7 +1459,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const via = resp?.data?.balance_via ? " via=" + String(resp.data.balance_via) : "";
       const ce = resp?.data?.chain_error ? " ce=" + String(resp.data.chain_error) : "";
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
-        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " vk=" + hasVk + " permit=" + hasPermit + via + ce;
+        " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " vk=" + hasVk + " permit=" + hasPermit +
+        " ui=" + SNVR_UI_BUILD + via + ce;
     }
 
     function profileAvatarUrl() {
