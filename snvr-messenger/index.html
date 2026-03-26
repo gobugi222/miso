@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-05";
+    const SNVR_UI_BUILD = "2026-03-27-06";
 
     const I18N = {
       en: {
@@ -999,6 +999,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           var u = new URL(location.href);
           u.searchParams.set("view", "settings");
           u.searchParams.set("keplr_autoconnect", "1");
+          var cur = getUser();
+          if (cur && cur.platform && cur.platform_user_id != null) {
+            u.searchParams.set("platform", String(cur.platform));
+            u.searchParams.set("platform_user_id", String(cur.platform_user_id));
+          }
+          u.searchParams.set("api", getApiUrl());
           target = u.toString();
         } else {
           target = "https://app.snvr.org/?view=settings&keplr_autoconnect=1";
@@ -1113,7 +1119,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     function stripDeepLinkQueryFromUrl() {
       var q = new URLSearchParams(location.search);
       if (!q.toString()) return;
-      ["view", "api", "to", "amount", "tgWebAppStartParam"].forEach(function (k) { q.delete(k); });
+      ["view", "api", "to", "amount", "tgWebAppStartParam", "keplr_autoconnect", "platform", "platform_user_id"].forEach(function (k) { q.delete(k); });
       var s = q.toString();
       try {
         history.replaceState({}, "", location.pathname + (s ? "?" + s : "") + location.hash);
@@ -1144,6 +1150,18 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         };
       } catch (_e) {
         return null;
+      }
+    }
+    function tryBootstrapUserFromQuery() {
+      try {
+        const q = new URLSearchParams(location.search);
+        const p = String(q.get("platform") || "").trim();
+        const id = String(q.get("platform_user_id") || "").trim();
+        if (!p || !id) return false;
+        setUser(p, id, getApiUrl());
+        return true;
+      } catch (_e) {
+        return false;
       }
     }
     async function tryTelegramAutoSignIn() {
@@ -3301,7 +3319,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       let signedIn = false;
       try {
-        signedIn = await tryTelegramAutoSignIn();
+        signedIn = tryBootstrapUserFromQuery() || await tryTelegramAutoSignIn();
       } catch (_e) {
         signedIn = false;
       }
