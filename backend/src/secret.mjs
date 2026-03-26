@@ -132,31 +132,40 @@ function getTxClient() {
   return txClient;
 }
 
-/** SNIP-20 잔액 조회 (address + viewing_key) */
+async function probeVkBalanceOnLcd(url, address, viewingKey, token, codeHash) {
+  try {
+    const client = getEphemeralQueryClient(url);
+    const result = await withLcdTimeout(
+      client.query.snip20.getBalance({
+        contract: { address: token, code_hash: codeHash },
+        address: String(address).trim(),
+        auth: { key: String(viewingKey).trim() },
+      }),
+      LCD_PROBE_PER_URL_MS
+    );
+    return { ok: true, amount: result?.balance?.amount ?? "0" };
+  } catch (e) {
+    const lastMsg = String(e?.message || "");
+    console.warn("getSnvrBalance error (" + url + "):", lastMsg);
+    if (lastMsg.includes("viewing_key") || lastMsg.includes("Wrong viewing key") || lastMsg.includes("viewing key")) {
+      return { ok: false, vkInvalid: true };
+    }
+    return { ok: false, vkInvalid: false };
+  }
+}
+
+/** SNIP-20 잔액 조회 (address + viewing_key) — LCD 후보 병렬 시도로 총 소요 시간을 ~1 URL 분량으로 줄임 (ce=budget 완화) */
 export async function getSnvrBalance(address, viewingKey) {
   const c = loadConfig();
   if (!c.snvr_token || !c.snvr_code_hash) return null;
   const urls = getLcdCandidates();
-  let lastMsg = "";
-  for (const url of urls) {
-    forceLcdUrl(url);
-    try {
-      const client = getQueryClient();
-      const result = await client.query.snip20.getBalance({
-        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash },
-        address: String(address).trim(),
-        auth: { key: String(viewingKey).trim() },
-      });
-      const amount = result?.balance?.amount ?? "0";
-      return amount;
-    } catch (e) {
-      lastMsg = String(e?.message || "");
-      console.warn("getSnvrBalance error (" + url + "):", lastMsg);
-      if (lastMsg.includes("viewing_key") || lastMsg.includes("Wrong viewing key") || lastMsg.includes("viewing key")) {
-        throw new Error("VIEWING_KEY_INVALID");
-      }
-    }
-  }
+  if (urls.length === 0) return null;
+  const results = await Promise.all(
+    urls.map((url) => probeVkBalanceOnLcd(url, address, viewingKey, c.snvr_token, c.snvr_code_hash))
+  );
+  const hit = results.find((r) => r.ok);
+  if (hit) return hit.amount;
+  if (results.some((r) => r.vkInvalid)) throw new Error("VIEWING_KEY_INVALID");
   return null;
 }
 
