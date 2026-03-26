@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-11";
+    const SNVR_UI_BUILD = "2026-03-27-12";
 
     const I18N = {
       en: {
@@ -1046,6 +1046,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
     function tryClickKeplrConnectButton() {
       try {
+        if (!window.keplr) return;
         showView("settings");
         var btn = document.getElementById("btnKeplrConnect");
         if (btn) btn.click();
@@ -1053,6 +1054,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
     function startKeplrAutoConnectRetry() {
       try {
+        if (!window.keplr) return;
         var tries = 0;
         var maxTries = 8; // ~20s
         var timer = setInterval(function () {
@@ -3136,11 +3138,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         var fromQuery = q.get("keplr_autoconnect") === "1";
         var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
         if (!fromQuery && !pending) return;
-        if (!window.keplr) {
-          // Keplr object can appear after wallet unlock; keep retrying briefly.
-          startKeplrAutoConnectRetry();
-          return;
-        }
+        if (!window.keplr) return;
         if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1" && !pending) return;
         setKeplrFlowStatus("autoconnect_attempt");
         sessionStorage.setItem("snvr_keplr_autoconnect_done", "1");
