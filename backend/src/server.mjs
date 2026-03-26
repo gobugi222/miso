@@ -886,6 +886,7 @@ app.post("/wallet/send", async (req, res) => {
 app.post("/wallet/link-secret", (req, res) => {
   const { platform = "telegram", platform_user_id, secret_address, viewing_key, permit: rawPermit, locale } = req.body || {};
   const permit = parsePermitInput(rawPermit);
+  const vk = String(viewing_key || "").trim();
   if (!platform_user_id || !secret_address) {
     return res.status(400).json({ ok: false, error: "platform_user_id, secret_address required" });
   }
@@ -894,7 +895,7 @@ app.post("/wallet/link-secret", (req, res) => {
   }
   const u = ensureUser(platform, platform_user_id);
   u.secret_address = String(secret_address).trim();
-  u.viewing_key = null;
+  u.viewing_key = vk || null;
   u.permit = permit || null;
   u.bot_balance_sync = true;
   if (locale && ["en", "ko", "ja"].includes(String(locale).toLowerCase())) u.locale = String(locale).toLowerCase();
@@ -915,12 +916,14 @@ app.get("/wallet/bot-balance-sync", (req, res) => {
     enabled: !!u.bot_balance_sync,
     has_secret_link: !!(u.secret_address && u.permit),
     secret_address: u.secret_address || null,
+    viewing_key: u.viewing_key || null,
     permit: u.permit || null,
   });
 });
 
 app.post("/wallet/bot-balance-sync", (req, res) => {
   const { platform = "telegram", platform_user_id, enabled, secret_address, viewing_key, permit: rawPermit, locale } = req.body || {};
+  const vk = String(viewing_key || "").trim();
   if (!platform_user_id) {
     return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   }
@@ -941,7 +944,7 @@ app.post("/wallet/bot-balance-sync", (req, res) => {
     return res.status(400).json({ ok: false, error: "secret_address and permit required when enabling sync" });
   }
   u.secret_address = String(secret_address).trim();
-  u.viewing_key = null;
+  u.viewing_key = vk || null;
   u.permit = permit || null;
   u.bot_balance_sync = true;
   saveDb();
@@ -1223,7 +1226,7 @@ app.get("/wallet/viewing-key", (req, res) => {
   const platform_user_id = req.query.platform_user_id;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = users.get(platformKey(platform, platform_user_id));
-  return res.json({ ok: true, viewing_key: null });
+  return res.json({ ok: true, viewing_key: u?.viewing_key || null });
 });
 
 // 뷰키 조회 (Secret Network /link-secret 연동 시)
@@ -1232,7 +1235,7 @@ app.get("/wallet/viewing-key", (req, res) => {
   const platform_user_id = req.query.platform_user_id;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = users.get(platformKey(platform, platform_user_id));
-  return res.json({ ok: true, viewing_key: null });
+  return res.json({ ok: true, viewing_key: u?.viewing_key || null });
 });
 
 // ——— 지갑 잔고 내역 (최근 트랜잭션)
