@@ -712,7 +712,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-16";
+    const SNVR_UI_BUILD = "2026-03-27-17";
 
     const I18N = {
       en: {
@@ -2385,6 +2385,46 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return false;
       }
     }
+    function getLcdCandidatesForMix(primaryLcd) {
+      const out = [];
+      const seen = new Set();
+      const add = (u) => {
+        const v = String(u || "").trim().replace(/\/$/, "");
+        if (!v || seen.has(v)) return;
+        seen.add(v);
+        out.push(v);
+      };
+      add(primaryLcd);
+      add("https://lcd.secret.express");
+      add("https://rest.lavenderfive.com/secretnetwork");
+      return out;
+    }
+    function isFetchLikeError(e) {
+      const m = String(e?.message || e || "").toLowerCase();
+      return m.includes("failed to fetch") || m.includes("networkerror") || m.includes("network request failed") || m.includes("fetch");
+    }
+    async function executeContractWithLcdFallback(ctx, execMsg, gasLimit) {
+      const urls = Array.isArray(ctx.lcdCandidates) && ctx.lcdCandidates.length ? ctx.lcdCandidates : [ctx.lcdUrl];
+      let lastErr = null;
+      const SecretNetworkClient = await loadSecretJsClientCtor();
+      for (let i = 0; i < urls.length; i += 1) {
+        const url = urls[i];
+        try {
+          const clientTry = new SecretNetworkClient({
+            url: url,
+            chainId: ctx.chainId,
+            wallet: ctx.signer,
+            walletAddress: ctx.sender,
+            encryptionUtils: ctx.enigmaUtils || undefined,
+          });
+          return await clientTry.tx.compute.executeContract(execMsg, { gasLimit: gasLimit || 320000 });
+        } catch (e) {
+          lastErr = e;
+          if (!isFetchLikeError(e)) throw e;
+        }
+      }
+      throw lastErr || new Error("MIX_TX_FAILED");
+    }
     async function getMixClient() {
       const cfg = await api("/wallet/chain-config");
       const chainId = cfg.data?.chain_id || cfg.chain_id;
@@ -2405,15 +2445,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const sender = accounts[0]?.address;
       if (!sender) throw new Error("No account from Keplr.");
       const enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
+      const lcdCandidates = getLcdCandidatesForMix(lcdUrl);
       const SecretNetworkClient = await loadSecretJsClientCtor();
       const client = new SecretNetworkClient({
-        url: lcdUrl,
+        url: lcdCandidates[0],
         chainId,
         wallet: signer,
         walletAddress: sender,
         encryptionUtils: enigmaUtils || undefined,
       });
-      return { client, sender, snvrAddr, snvrCodeHash, mixerAddr, mixerCodeHash, decimals };
+      return { client, signer, sender, chainId, lcdUrl: lcdCandidates[0], lcdCandidates, enigmaUtils, snvrAddr, snvrCodeHash, mixerAddr, mixerCodeHash, decimals };
     }
     async function refreshMixPending() {
       const el = document.getElementById("mixPending");
@@ -2461,12 +2502,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const amount = parseFloat(document.getElementById("mixAmount").value);
       if (!amount || amount <= 0) return setMixResult("Enter a valid amount.", false);
       try {
-        const { client, sender, snvrAddr, snvrCodeHash, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
+        const { client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils, snvrAddr, snvrCodeHash, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
         const amountRaw = humanToRaw(amount, decimals);
         if (!amountRaw) return setMixResult("Invalid amount.", false);
         const ticketSecret = "rt-" + Date.now() + "-" + Math.random().toString(16).slice(2) + "-" + sender;
         const ticketHash = await sha256Hex(ticketSecret);
-        const tx = await client.tx.compute.executeContract({
+        const tx = await executeContractWithLcdFallback({
+          client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils,
+        }, {
           sender,
           contract_address: snvrAddr,
           code_hash: snvrCodeHash,
@@ -2478,7 +2521,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               memo: ticketHash,
             },
           },
-        }, { gasLimit: 320000 });
+        }, 320000);
         const txHash = tx?.transactionHash || tx?.hash || "ok";
         localStorage.setItem("snvr_mix_last_deposit_at", String(Date.now()));
         addRoutingTicket({
@@ -2513,7 +2556,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (!accepted) return setMixResult("Cancelled: Privacy Recommended is advised.", false);
       }
       try {
-        const { client, sender, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
+        const { client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
         const amountRaw = humanToRaw(amount, decimals);
         const ticket = pickClaimableTicketByAmount(amountRaw);
         if (!ticket?.ticket_secret) {
@@ -2525,12 +2568,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             );
           return setMixResult("No claimable local ticket for this amount. Deposit first on this device.", false);
         }
-        const tx = await client.tx.compute.executeContract({
+        const tx = await executeContractWithLcdFallback({
+          client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils,
+        }, {
           sender,
           contract_address: mixerAddr,
           code_hash: mixerCodeHash,
           msg: { claim: { recipient: to, amount: amountRaw, ticket_secret: ticket.ticket_secret } },
-        }, { gasLimit: 320000 });
+        }, 320000);
         const txHash = tx?.transactionHash || tx?.hash || "ok";
         markTicketClaimed(ticket.ticket_hash);
         setMixResult(`Claim submitted. Tx: ${txHash}`, true);
