@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-19";
+    const SNVR_UI_BUILD = "2026-03-27-20";
 
     const I18N = {
       en: {
@@ -1952,14 +1952,23 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         }
         const prevCreds = getCreds();
         if (prevCreds?.secret_address && prevCreds.secret_address !== secretAddress) {
-          statusEl.textContent =
-            "Keplr selected a different address. To prevent 0-balance mistakes, switching is blocked. " +
-            "Please change Keplr account back to your linked address and try again.\n\n" +
+          const okSwitch = confirm(
+            "A different Keplr address is selected.\n\n" +
             "Linked: " + prevCreds.secret_address + "\n" +
-            "Keplr: " + secretAddress;
-          statusEl.className = "error";
-          setKeplrFlowStatus("cancel_address_mismatch");
-          return;
+            "Keplr: " + secretAddress + "\n\n" +
+            "If you continue, this account will switch to the new address and previous local link data will be replaced."
+          );
+          if (!okSwitch) {
+            statusEl.textContent =
+              "Address switch cancelled. Change Keplr account back to your linked address, or reconnect and approve switching.";
+            statusEl.className = "error";
+            setKeplrFlowStatus("cancel_address_mismatch");
+            return;
+          }
+          clearCreds();
+          setKeplrFlowStatus("switching_address");
+          statusEl.textContent = "Switching to new Keplr address and requesting approval...";
+          statusEl.className = "search-hint";
         }
         let permit = null;
         statusEl.textContent = "Waiting permit approval... (up to 45s)";
