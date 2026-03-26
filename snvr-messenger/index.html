@@ -673,9 +673,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <p id="botBalanceSyncStatus" class="search-hint" style="margin-top:8px;">Loading...</p>
         </div>
         <div class="card">
-          <p class="search-hint">API: <span id="currentApiUrl"></span></p>
-          <p id="balanceDebug" class="search-hint" style="margin-top:6px;font-size:0.78rem;opacity:0.9;"></p>
-          <p class="search-hint">Log out to change the API URL on the sign-in screen.</p>
+          <h3 class="view-title" style="font-size:1rem">📱 Mobile quick flow</h3>
+          <p class="search-hint" style="margin-top:0;">
+            1) Tap <strong>Connect Keplr</strong> in Settings.<br />
+            2) In Keplr browser, login + approve permit/viewing key.<br />
+            3) Return and wait up to 20 seconds for auto-sync.<br />
+            4) Confirm <strong>Current: ON</strong> and balance refresh.<br />
+            If balance remains 0, keep this page open and refresh once.
+          </p>
         </div>
         <div class="card">
           <h3 class="view-title" style="font-size:1rem">📲 Add to home screen</h3>
@@ -683,12 +688,6 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           <p class="search-hint">For an app-like experience, use the button above or follow your browser.</p>
           <p class="search-hint"><strong>Android</strong>: Chrome menu (⋮) → Install app or Add to Home screen</p>
           <p class="search-hint"><strong>iPhone</strong>: Safari share → Add to Home Screen</p>
-        </div>
-        <div class="card">
-          <h3 class="view-title" style="font-size:1rem">Product notes</h3>
-          <p class="search-hint"><strong>Telegram-style UI</strong>: bubbles, avatars, Enter to send, read receipts (✓).</p>
-          <p class="search-hint"><strong>Roadmap</strong>: typing indicator, online status, replies — needs API work.</p>
-          <p class="search-hint"><strong>Voice/video</strong>: would need WebRTC + signaling.</p>
         </div>
       </div>
     </main>
@@ -713,7 +712,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-13";
+    const SNVR_UI_BUILD = "2026-03-27-15";
 
     const I18N = {
       en: {
@@ -1558,6 +1557,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const tgu = getTelegramInitUser();
         return " tg=" + (tgu?.id ? String(tgu.id) : "-");
       })();
+      let verbose = false;
+      try {
+        const q = new URLSearchParams(location.search);
+        verbose = q.get("debug") === "1" || localStorage.getItem("snvr_debug_verbose") === "1";
+      } catch (_e) { /* ignore */ }
+      if (!verbose) {
+        el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
+          " vk=" + hasVk + " permit=" + hasPermit + " ui=" + SNVR_UI_BUILD;
+        return;
+      }
       el.textContent = "Debug balance=" + bal + " source=" + src + " auth=" + auth +
         " user=" + u.platform + ":" + u.platform_user_id + " addr=" + shortAddr + " vk=" + hasVk + " permit=" + hasPermit +
         " ui=" + SNVR_UI_BUILD + su + tg + via + ce;
