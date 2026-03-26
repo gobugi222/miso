@@ -453,6 +453,9 @@
           </p>
           <input type="text" id="mixTo" placeholder="Claim to secret1… (new account recommended)" />
           <input type="number" id="mixAmount" placeholder="50" min="0.01" step="0.01" />
+          <select id="mixTicketSelect" style="margin-bottom:8px;">
+            <option value="">Auto-select by amount (or pick pending ticket below)</option>
+          </select>
           <button id="btnMixDeposit" class="secondary">1) Deposit to Relay Pool</button>
           <button id="btnMixClaimRecommended" class="primary">2) Claim (Privacy Recommended)</button>
           <button id="btnMixClaimInstant" class="secondary">2) Instant Claim</button>
@@ -713,7 +716,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-20";
+    const SNVR_UI_BUILD = "2026-03-27-21";
 
     const I18N = {
       en: {
@@ -2239,14 +2242,26 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         }) || null
       );
     }
+    function findPendingTicketByHash(ticketHash) {
+      const key = String(ticketHash || "").trim();
+      if (!key) return null;
+      const arr = getRoutingTickets();
+      return arr.find((t) => !t.claimed && String(t.ticket_hash || "") === key) || null;
+    }
+    function shortHash(h) {
+      const v = String(h || "");
+      return v ? v.slice(0, 8) + "..." + v.slice(-6) : "-";
+    }
     function renderTicketList() {
       const el = document.getElementById("mixTicketList");
       const targetEl = document.getElementById("mixClaimTarget");
+      const pickEl = document.getElementById("mixTicketSelect");
       if (!el) return;
       const arr = getRoutingTickets();
       if (!arr.length) {
         el.textContent = "Local routing tickets: none";
         if (targetEl) targetEl.textContent = "Claim target: none (deposit first).";
+        if (pickEl) pickEl.innerHTML = '<option value="">Auto-select by amount (or pick pending ticket below)</option>';
         return;
       }
       const toHuman = (raw) => {
@@ -2263,11 +2278,21 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const claimed = arr.filter((t) => !!t.claimed);
       const pendingTotalRaw = pending.reduce((acc, t) => acc + Number(t.amount_raw || 0), 0);
       const claimTarget = pending.length ? pending[0] : null;
+      if (pickEl) {
+        const options = ['<option value="">Auto-select by amount (or pick pending ticket below)</option>'];
+        pending.slice(0, 20).forEach((t, i) => {
+          const dt = new Date(Number(t.created_at || Date.now())).toLocaleString();
+          options.push(
+            `<option value="${String(t.ticket_hash || "")}">${i + 1}) ${toHuman(t.amount_raw)} SNVR | ${dt} | ${shortHash(t.ticket_hash)}</option>`
+          );
+        });
+        pickEl.innerHTML = options.join("");
+      }
       if (targetEl) {
         if (claimTarget) {
           const at = new Date(Number(claimTarget.created_at || Date.now())).toLocaleString();
           targetEl.textContent =
-            `Claim target now: ${toHuman(claimTarget.amount_raw)} SNVR (oldest pending, created ${at}, ${ageMin(claimTarget.created_at)} min ago)`;
+            `Claim target now: ${toHuman(claimTarget.amount_raw)} SNVR (oldest pending, created ${at}, ${ageMin(claimTarget.created_at)} min ago, ticket ${shortHash(claimTarget.ticket_hash)})`;
         } else {
           targetEl.textContent = "Claim target: none (all local tickets already claimed).";
         }
@@ -2276,7 +2301,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const dt = new Date(Number(t.created_at || Date.now())).toLocaleString();
         const minsAgo = ageMin(t.created_at);
         const st = t.claimed ? "claimed" : "pending";
-        return `${i + 1}) ${toHuman(t.amount_raw)} SNVR | ${st} | ${dt} (${minsAgo} min ago)`;
+        return `${i + 1}) ${toHuman(t.amount_raw)} SNVR | ${st} | ${dt} (${minsAgo} min ago) | ${shortHash(t.ticket_hash)}`;
       });
       el.textContent =
         `Local routing tickets: total=${arr.length}, pending=${pending.length}, claimed=${claimed.length}, pending_total=${toHuman(pendingTotalRaw)} SNVR\n` +
@@ -2535,7 +2560,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const arr = getRoutingTickets();
         const pendingCount = arr.filter((t) => !t.claimed).length;
         el.textContent = pendingCount > 0
-          ? `Pending: chain status unavailable now (network/LCD/Keplr). Local pending tickets: ${pendingCount}. You can still claim by amount from local ticket list below.`
+          ? `Pending: chain status check is temporarily unavailable (network/LCD/Keplr). Local pending tickets: ${pendingCount}. You can still claim by selecting a pending ticket below.`
           : "Pending: chain status unavailable now (network/LCD/Keplr).";
         renderTicketList();
       }
@@ -2584,8 +2609,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function mixClaim(requireDelay) {
       const to = document.getElementById("mixTo").value.trim();
       const amount = parseFloat(document.getElementById("mixAmount").value);
+      const selectedHash = String(document.getElementById("mixTicketSelect")?.value || "").trim();
       if (!to || !to.startsWith("secret1")) return setMixResult("Recipient must be a secret1... address.", false);
-      if (!amount || amount <= 0) return setMixResult("Enter a valid amount.", false);
+      if (!selectedHash && (!amount || amount <= 0)) return setMixResult("Enter a valid amount (or select a pending ticket).", false);
       if (requireDelay) {
         const last = Number(localStorage.getItem("snvr_mix_last_deposit_at") || 0);
         const elapsedMin = last ? Math.floor((Date.now() - last) / 60000) : 999999;
@@ -2599,9 +2625,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
       try {
         const { client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
-        const amountRaw = humanToRaw(amount, decimals);
-        const ticket = pickClaimableTicketByAmount(amountRaw);
+        let amountRaw = humanToRaw(amount, decimals);
+        let ticket = selectedHash ? findPendingTicketByHash(selectedHash) : pickClaimableTicketByAmount(amountRaw);
+        if (ticket?.amount_raw) amountRaw = String(ticket.amount_raw);
         if (!ticket?.ticket_secret) {
+          if (selectedHash) {
+            return setMixResult("Selected ticket is not pending anymore. Refresh chain status and choose another ticket.", false);
+          }
           const claimedSame = findTicketByAmount(amountRaw, { claimedOnly: true });
           if (claimedSame)
             return setMixResult(
