@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-07";
+    const SNVR_UI_BUILD = "2026-03-27-08";
 
     const I18N = {
       en: {
@@ -1202,6 +1202,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return false;
       }
     }
+    function getSessionUser() {
+      const u = getUser();
+      if (u && u.platform && u.platform_user_id != null) return u;
+      try {
+        if (tryBootstrapUserFromQuery()) {
+          const u2 = getUser();
+          if (u2 && u2.platform && u2.platform_user_id != null) return u2;
+        }
+      } catch (_e) { /* ignore */ }
+      return null;
+    }
     async function tryTelegramAutoSignIn() {
       const tgUser = getTelegramInitUser();
       if (!tgUser) return false;
@@ -1248,7 +1259,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       return { ok: res.ok, status: res.status, data };
     }
     async function syncServerWalletLink(secretAddress, viewingKey, permit) {
-      const u = getUser();
+      const u = getSessionUser();
       if (!u || !secretAddress) return { ok: false, skipped: true };
       const creds = getCreds();
       const p = permit !== undefined ? permit : creds?.permit || null;
@@ -1262,7 +1273,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       });
     }
     async function ensureServerPermitSync() {
-      const u = getUser();
+      const u = getSessionUser();
       const c = getCreds();
       if (!u || !c?.secret_address || !isPermitSessionValid(c?.permit)) return false;
       const linkR = await syncServerWalletLink(c.secret_address, "", c.permit);
@@ -1278,7 +1289,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       return !!onR.ok;
     }
     async function hydrateCredsFromServer() {
-      const u = getUser();
+      const u = getSessionUser();
       if (!u) return;
       const prev = getCreds() || {};
       const q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
@@ -1861,7 +1872,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     })();
 
     document.getElementById("btnKeplrConnect").onclick = async function () {
-      const u = getUser();
+      const u = getSessionUser();
       const statusEl = document.getElementById("keplrStatus");
       const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
       if (!u) { statusEl.textContent = "Please sign in first."; statusEl.classList.remove("hidden"); statusEl.className = "error"; return; }
@@ -2880,7 +2891,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     }
     /** After Keplr/permit success: enable Telegram bot on-chain sync without asking the user to tick the box. */
     async function enableBotBalanceSyncOnServer(secretAddress, viewingKey, permit) {
-      const u = getUser();
+      const u = getSessionUser();
       const toggle = document.getElementById("botBalanceSyncToggle");
       const status = document.getElementById("botBalanceSyncStatus");
       if (!u || !secretAddress) return;
@@ -3045,7 +3056,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           stopPendingServerPoll();
           return false;
         }
-        var u = getUser();
+        var u = getSessionUser();
         if (!u) return false;
         var q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
         var r = await api("/wallet/bot-balance-sync?" + q);
