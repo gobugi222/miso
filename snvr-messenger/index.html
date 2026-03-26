@@ -962,13 +962,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       localStorage.removeItem(PERMIT_BACKUP_KEY);
     }
     function hasWalletAuthCreds(c) {
-      // permit-only: viewing key는 잔액 조회 흐름에서 사용하지 않는다.
-      return !!(c && c.secret_address && isPermitSessionValid(c.permit));
+      // Prefer viewing key when available; fall back to permit.
+      return !!(c && c.secret_address && (String(c.viewing_key || "").trim() || isPermitSessionValid(c.permit)));
     }
     function bodyWithCreds(body) {
       const c = getCreds();
       if (c && c.secret_address) {
         var out = Object.assign({}, body, { secret_address: c.secret_address });
+        if (String(c.viewing_key || "").trim()) out.viewing_key = String(c.viewing_key || "").trim();
         if (isPermitSessionValid(c.permit)) out.permit = c.permit;
         return out;
       }
@@ -1865,7 +1866,10 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           setKeplrFlowStatus("error_no_auth");
           return;
         } else {
-          setCreds(secretAddress, "", permit);
+          // If Keplr already has a viewing key for this SNIP-20, pull it automatically.
+          // This avoids manual copy/paste on mobile, while still keeping permit for fallback/bot sync.
+          const autoVk = await tryGetViewingKeyFromKeplr(keplr, chainId, snvrAddr);
+          setCreds(secretAddress, autoVk || "", permit);
           if (permit) {
             const botToggle = document.getElementById("botBalanceSyncToggle");
             const botSyncWants = !!(botToggle && botToggle.checked);
@@ -1893,7 +1897,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               }
             }
           }
-          statusEl.textContent = "Saved locally (Zero-Log)! " + secretAddress.slice(0, 12) + "... (permit ready)";
+          statusEl.textContent =
+            "Saved locally (Zero-Log)! " +
+            secretAddress.slice(0, 12) +
+            "... (" +
+            (autoVk ? "viewing key + permit ready" : "permit ready") +
+            ")";
           statusEl.className = "success";
           setKeplrFlowStatus("connected");
         }
@@ -2130,6 +2139,15 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         mod?.default;
       if (!ctor) throw new Error("Failed to load SecretNetworkClient from secretjs.");
       return ctor;
+    }
+    async function tryGetViewingKeyFromKeplr(keplr, chainId, tokenAddress) {
+      try {
+        if (!keplr || typeof keplr.getSecret20ViewingKey !== "function") return "";
+        const k = await keplr.getSecret20ViewingKey(chainId, tokenAddress);
+        return String(k || "").trim();
+      } catch (_e) {
+        return "";
+      }
     }
     async function createBalancePermit(keplr, chainId, signerAddress, tokenAddress) {
       if (!keplr || !keplr.signAmino) return null;
