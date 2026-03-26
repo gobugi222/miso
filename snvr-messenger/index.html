@@ -716,7 +716,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-21";
+    const SNVR_UI_BUILD = "2026-03-27-22";
 
     const I18N = {
       en: {
@@ -2640,6 +2640,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             );
           return setMixResult("No claimable local ticket for this amount. Deposit first on this device.", false);
         }
+        const ticketWhen = new Date(Number(ticket.created_at || Date.now())).toLocaleString();
+        const ticketId = shortHash(ticket.ticket_hash);
+        const previewAmount = Number(amountRaw || 0) / Math.pow(10, decimals);
+        const proceed = confirm(
+          `Claim this ticket?\n` +
+          `Amount: ${previewAmount} SNVR\n` +
+          `Ticket: ${ticketId}\n` +
+          `Created: ${ticketWhen}\n` +
+          `Recipient: ${to}`
+        );
+        if (!proceed) return setMixResult("Cancelled: claim target review.", false);
         const tx = await executeContractWithLcdFallback({
           client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils,
         }, {
