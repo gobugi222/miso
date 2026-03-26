@@ -261,6 +261,13 @@ function rememberChainBalance(u, humanBalance) {
   u.balance = n;
 }
 
+/** 체인 스냅샷이 permit 오조회 등으로 0에 고착된 것처럼 보일 때 제거 */
+function invalidateChainBalanceSnapshot(u) {
+  if (!u) return;
+  u.last_chain_balance = null;
+  u.last_chain_at = null;
+}
+
 function getFallbackBalance(u) {
   const mem = Number(u?.balance || 0);
   const last = Number(u?.last_chain_balance);
@@ -381,6 +388,7 @@ app.get("/wallet/balance", async (req, res) => {
   let pending_chain = false;
   let permit_debug = null;
   const stale = !v.hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
+  let getChainError = null;
   if (u.secret_address && (u.permit || u.viewing_key)) {
     // sync_chain=1이면 캐시가 신선해도 재조회(잘못된 0 캐시 고착 방지)
     if (syncChain) {
@@ -394,12 +402,20 @@ app.get("/wallet/balance", async (req, res) => {
           saveDb();
         } else {
           console.warn("[balance] sync_chain GET: null", userKey);
+          invalidateChainBalanceSnapshot(u);
+          getChainError = "chain_unavailable";
+          saveDb();
         }
       } catch (e) {
         if (e?.message === "VIEWING_KEY_INVALID") console.warn("[balance] sync_chain GET: VIEWING_KEY_INVALID", userKey);
         else if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain GET: PERMIT_INVALID", userKey);
         else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain GET: BUDGET", userKey, budgetMs + "ms");
         else console.warn("[balance] sync_chain GET:", userKey, String(e?.message || e));
+        if (e?.message === "VIEWING_KEY_INVALID" || e?.message === "PERMIT_INVALID") {
+          invalidateChainBalanceSnapshot(u);
+          getChainError = e.message === "VIEWING_KEY_INVALID" ? "viewing_key_invalid" : "permit_invalid";
+          saveDb();
+        } else if (isBalanceBudgetError(e)) getChainError = "budget";
       }
       v = walletBalanceView(u);
     } else if (stale) {
@@ -431,6 +447,7 @@ app.get("/wallet/balance", async (req, res) => {
     source: v.hasCachedChain ? "cached_chain" : "memory_fallback",
     auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
     pending_chain,
+    ...(getChainError ? { chain_error: getChainError } : {}),
   };
   if (debugPermit && u.secret_address && u.permit) {
     // Best-effort: when debugging, return a probe result so we can see *why* permit chain query fails.
@@ -491,6 +508,7 @@ app.post("/wallet/balance", async (req, res) => {
   // 0) viewing_key 우선 — permit 경로가 0을 반환하는 경우가 있어 메신저(Keplr)와 맞춤
   if (secretAddrTrim && viewingKey) {
     let pending_chain = false;
+    let chain_error = null;
     // sync_chain이면 캐시가 아직 신선해도 재조회(permit으로 0이 박힌 직후 뷰키 반영)
     if (syncChain) {
       try {
@@ -501,11 +519,20 @@ app.post("/wallet/balance", async (req, res) => {
           saveDb();
         } else {
           console.warn("[balance] sync_chain post_vk: null", userKey);
+          invalidateChainBalanceSnapshot(u);
+          chain_error = "chain_unavailable";
+          saveDb();
         }
       } catch (e) {
-        if (e?.message === "VIEWING_KEY_INVALID") console.warn("[balance] sync_chain post_vk: VIEWING_KEY_INVALID", userKey);
-        else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain post_vk: BUDGET", userKey, budgetMs + "ms");
-        else console.warn("[balance] sync_chain post_vk:", userKey, String(e?.message || e));
+        if (e?.message === "VIEWING_KEY_INVALID") {
+          console.warn("[balance] sync_chain post_vk: VIEWING_KEY_INVALID", userKey);
+          invalidateChainBalanceSnapshot(u);
+          chain_error = "viewing_key_invalid";
+          saveDb();
+        } else if (isBalanceBudgetError(e)) {
+          console.warn("[balance] sync_chain post_vk: BUDGET", userKey, budgetMs + "ms");
+          chain_error = "budget";
+        } else console.warn("[balance] sync_chain post_vk:", userKey, String(e?.message || e));
       }
       v = walletBalanceView(u);
     } else if (stale) {
@@ -534,6 +561,7 @@ app.post("/wallet/balance", async (req, res) => {
       auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
       pending_chain,
       balance_via: "viewing_key",
+      ...(chain_error ? { chain_error } : {}),
     });
   }
   // 1) permit
@@ -544,6 +572,7 @@ app.post("/wallet/balance", async (req, res) => {
       });
     }
     let pending_chain = false;
+    let chain_error = null;
     if (syncChain) {
       try {
         const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit), budgetMs);
@@ -553,11 +582,20 @@ app.post("/wallet/balance", async (req, res) => {
           saveDb();
         } else {
           console.warn("[balance] sync_chain post: null", userKey);
+          invalidateChainBalanceSnapshot(u);
+          chain_error = "chain_unavailable";
+          saveDb();
         }
       } catch (e) {
-        if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain post: PERMIT_INVALID", userKey);
-        else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain post: BUDGET", userKey, budgetMs + "ms");
-        else console.warn("[balance] sync_chain post:", userKey, String(e?.message || e));
+        if (e?.message === "PERMIT_INVALID") {
+          console.warn("[balance] sync_chain post: PERMIT_INVALID", userKey);
+          invalidateChainBalanceSnapshot(u);
+          chain_error = "permit_invalid";
+          saveDb();
+        } else if (isBalanceBudgetError(e)) {
+          console.warn("[balance] sync_chain post: BUDGET", userKey, budgetMs + "ms");
+          chain_error = "budget";
+        } else console.warn("[balance] sync_chain post:", userKey, String(e?.message || e));
       }
       v = walletBalanceView(u);
     } else if (stale) {
@@ -586,6 +624,7 @@ app.post("/wallet/balance", async (req, res) => {
       auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
       pending_chain,
       balance_via: "permit",
+      ...(chain_error ? { chain_error } : {}),
     });
   }
   if (rawPermit && secret_address && !permit) {
@@ -594,6 +633,7 @@ app.post("/wallet/balance", async (req, res) => {
   // 2) 저장된 기존 링크(permit) fallback
   if (u.secret_address && u.permit) {
     let pending_chain = false;
+    let chain_error = null;
     if (syncChain) {
       try {
         const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
@@ -603,11 +643,20 @@ app.post("/wallet/balance", async (req, res) => {
           saveDb();
         } else {
           console.warn("[balance] sync_chain stored: null", userKey);
+          invalidateChainBalanceSnapshot(u);
+          chain_error = "chain_unavailable";
+          saveDb();
         }
       } catch (e) {
-        if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain stored: PERMIT_INVALID", userKey);
-        else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain stored: BUDGET", userKey, budgetMs + "ms");
-        else console.warn("[balance] sync_chain stored:", userKey, String(e?.message || e));
+        if (e?.message === "PERMIT_INVALID") {
+          console.warn("[balance] sync_chain stored: PERMIT_INVALID", userKey);
+          invalidateChainBalanceSnapshot(u);
+          chain_error = "permit_invalid";
+          saveDb();
+        } else if (isBalanceBudgetError(e)) {
+          console.warn("[balance] sync_chain stored: BUDGET", userKey, budgetMs + "ms");
+          chain_error = "budget";
+        } else console.warn("[balance] sync_chain stored:", userKey, String(e?.message || e));
       }
       v = walletBalanceView(u);
     } else if (stale) {
@@ -636,6 +685,7 @@ app.post("/wallet/balance", async (req, res) => {
       auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
       pending_chain,
       balance_via: "stored_permit",
+      ...(chain_error ? { chain_error } : {}),
     });
   }
   const v0 = walletBalanceView(u);
