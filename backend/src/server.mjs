@@ -385,8 +385,8 @@ app.get("/wallet/balance", async (req, res) => {
     if (syncChain) {
       try {
         let raw = null;
-        if (u.permit) raw = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
-        else if (u.viewing_key) raw = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
+        if (u.viewing_key) raw = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
+        else if (u.permit) raw = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
         if (raw != null) {
           const human = Number(raw) / 1e9;
           rememberChainBalance(u, human);
@@ -395,7 +395,8 @@ app.get("/wallet/balance", async (req, res) => {
           console.warn("[balance] sync_chain GET: null", userKey);
         }
       } catch (e) {
-        if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain GET: PERMIT_INVALID", userKey);
+        if (e?.message === "VIEWING_KEY_INVALID") console.warn("[balance] sync_chain GET: VIEWING_KEY_INVALID", userKey);
+        else if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain GET: PERMIT_INVALID", userKey);
         else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain GET: BUDGET", userKey, budgetMs + "ms");
         else console.warn("[balance] sync_chain GET:", userKey, String(e?.message || e));
       }
@@ -404,8 +405,8 @@ app.get("/wallet/balance", async (req, res) => {
       pending_chain = scheduleChainRefresh(userKey, async () => {
         try {
           let raw = null;
-          if (u.permit) raw = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
-          else if (u.viewing_key) raw = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
+          if (u.viewing_key) raw = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
+          else if (u.permit) raw = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
           if (raw != null) {
             const human = Number(raw) / 1e9;
             rememberChainBalance(u, human);
@@ -414,7 +415,8 @@ app.get("/wallet/balance", async (req, res) => {
             console.warn("[balance] chain_refresh GET: null", userKey);
           }
         } catch (e) {
-          if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh GET: PERMIT_INVALID", userKey);
+          if (e?.message === "VIEWING_KEY_INVALID") console.warn("[balance] chain_refresh GET: VIEWING_KEY_INVALID", userKey);
+          else if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh GET: PERMIT_INVALID", userKey);
           else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh GET: BUDGET", userKey, budgetMs + "ms");
           else console.warn("[balance] chain_refresh GET:", userKey, String(e?.message || e));
         }
@@ -468,10 +470,11 @@ function parsePermitInput(rawPermit) {
   }
 }
 
-/** 메신저 Zero-Log: 클라이언트가 permit만 담아 보냄. 저장 안 함. */
+/** 메신저 Zero-Log: 클라이언트가 permit / viewing_key 담아 보냄(저장은 bot-sync 정책에 따름). */
 app.post("/wallet/balance", async (req, res) => {
-  const { platform = "telegram", platform_user_id, secret_address, permit: rawPermit, debug_permit } = req.body || {};
+  const { platform = "telegram", platform_user_id, secret_address, permit: rawPermit, viewing_key: rawViewingKey, debug_permit } = req.body || {};
   const permit = parsePermitInput(rawPermit);
+  const viewingKey = String(rawViewingKey || "").trim();
   const debugPermit = String(debug_permit || "") === "1";
   const syncChain =
     String(req.body?.sync_chain ?? req.query?.sync_chain ?? "") === "1" || req.body?.sync_chain === true;
@@ -479,11 +482,59 @@ app.post("/wallet/balance", async (req, res) => {
   const budgetMs = clampInt(req.body?.budget_ms ?? req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? defaultPostBudget;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
-  const chainLinked = Boolean(u.secret_address && u.permit);
+  const chainLinked = Boolean(u.secret_address && (u.permit || u.viewing_key));
   const userKey = platformKey(platform, platform_user_id);
   let v = walletBalanceView(u);
   const stale = !v.hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
-  // 1) permit 우선
+  const secretAddrTrim = secret_address ? String(secret_address).trim() : "";
+  // 0) viewing_key 우선 — permit 경로가 0을 반환하는 경우가 있어 메신저(Keplr)와 맞춤
+  if (secretAddrTrim && viewingKey) {
+    let pending_chain = false;
+    // sync_chain이면 캐시가 아직 신선해도 재조회(permit으로 0이 박힌 직후 뷰키 반영)
+    if (syncChain) {
+      try {
+        const chainBal = await withChainBudget(getSnvrBalance(secretAddrTrim, viewingKey), budgetMs);
+        if (chainBal != null) {
+          const human = Number(chainBal) / 1e9;
+          rememberChainBalance(u, human);
+          saveDb();
+        } else {
+          console.warn("[balance] sync_chain post_vk: null", userKey);
+        }
+      } catch (e) {
+        if (e?.message === "VIEWING_KEY_INVALID") console.warn("[balance] sync_chain post_vk: VIEWING_KEY_INVALID", userKey);
+        else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain post_vk: BUDGET", userKey, budgetMs + "ms");
+        else console.warn("[balance] sync_chain post_vk:", userKey, String(e?.message || e));
+      }
+      v = walletBalanceView(u);
+    } else if (stale) {
+      pending_chain = scheduleChainRefresh(userKey + "::post_vk", async () => {
+        try {
+          const chainBal = await withChainBudget(getSnvrBalance(secretAddrTrim, viewingKey), budgetMs);
+          if (chainBal != null) {
+            const human = Number(chainBal) / 1e9;
+            rememberChainBalance(u, human);
+            saveDb();
+          } else {
+            console.warn("[balance] chain_refresh post_vk: null", userKey);
+          }
+        } catch (e) {
+          if (e?.message === "VIEWING_KEY_INVALID") console.warn("[balance] chain_refresh post_vk: VIEWING_KEY_INVALID", userKey);
+          else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh post_vk: BUDGET", userKey, budgetMs + "ms");
+          else console.warn("[balance] chain_refresh post_vk:", userKey, String(e?.message || e));
+        }
+      });
+    }
+    return res.json({
+      ok: true,
+      chain_linked: true,
+      balance: v.immediate,
+      source: v.hasCachedChain ? "cached_chain" : "memory_fallback",
+      auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
+      pending_chain,
+    });
+  }
+  // 1) permit
   if (secret_address && permit) {
     if (debugPermit) {
       scheduleChainRefresh(userKey + "::probe", async () => {
@@ -1347,5 +1398,4 @@ app.listen(PORT, () => {
   }
   if (TELEGRAM_BOT_TOKEN) console.log("  [송금알림] 텔레그램 봇 토큰 로드됨 → 입금 시 텔레그램 알림 전송 가능");
   else console.warn("  [송금알림] TELEGRAM_BOT_TOKEN 없음 → backend/.env 또는 telegram-bot/.env의 BOT_TOKEN 필요");
-  
 });
