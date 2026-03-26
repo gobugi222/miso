@@ -89,7 +89,13 @@ async function notifyTelegram(chatId, text) {
 }
 
 // 연결 확인 (404 나올 때 메신저에서 "백엔드 주소 확인" 안내용)
-app.get("/health", (req, res) => res.json({ ok: true, service: "snvr-backend" }));
+app.get("/health", (req, res) =>
+  res.json({
+    ok: true,
+    service: "snvr-backend",
+    build: process.env.BUILD_ID || null,
+  })
+);
 
 // 체인 설정 (Keplr 연결용. 메인넷 배포 후 사용)
 app.get("/wallet/chain-config", (req, res) => {
@@ -333,6 +339,7 @@ app.get("/wallet/balance", async (req, res) => {
   let v = walletBalanceView(u);
   const userKey = platformKey(platform, platform_user_id);
   let pending_chain = false;
+  let permit_debug = null;
   const stale = !v.hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
   if (stale && u.secret_address && (u.permit || u.viewing_key)) {
     if (syncChain) {
@@ -383,10 +390,14 @@ app.get("/wallet/balance", async (req, res) => {
     pending_chain,
   };
   if (debugPermit && u.secret_address && u.permit) {
-    // Probe is best-effort and should not block the response.
-    scheduleChainRefresh(userKey + "::probe", async () => {
-      try { await withChainBudget(getSnvrBalanceWithPermitProbe(u.secret_address, u.permit), budgetMs); } catch (_e) {}
-    });
+    // Best-effort: when debugging, return a probe result so we can see *why* permit chain query fails.
+    // Keep a shorter budget so it doesn't hang the endpoint.
+    try {
+      permit_debug = await withChainBudget(getSnvrBalanceWithPermitProbe(u.secret_address, u.permit), Math.min(12000, budgetMs));
+    } catch (e) {
+      permit_debug = isBalanceBudgetError(e) ? { ok: false, error_code: "BUDGET" } : { ok: false, error_code: "PROBE_FAILED", errors: [String(e?.message || e)] };
+    }
+    out.permit_debug = permit_debug;
   }
   return res.json(out);
 });
