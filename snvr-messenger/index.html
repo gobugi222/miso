@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-01";
+    const SNVR_UI_BUILD = "2026-03-27-02";
 
     const I18N = {
       en: {
@@ -1331,7 +1331,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       // budget_ms=1500은 서버에서 최소 5초로 올라가도 Gateway+LCD에는 짧음 → 첫 응답이 0/memory_fallback로 고정되는 경우가 많음.
       // sync_chain: 같은 요청 안에서 체인 조회까지 기다린 뒤 JSON 반환(최대 수십 초). 첫 화면에 실제 잔고 표시용.
       var rBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      rBody.budget_ms = 30000;
+      rBody.budget_ms = 90000;
       rBody.sync_chain = true;
       let r = await api("/wallet/balance", rBody);
       let hadAuthFallback = false;
@@ -1339,7 +1339,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         // Refresh can race with wallet-cred hydration in WebView; re-hydrate once before fallback.
         try { await hydrateCredsFromServer(); } catch (_e) { /* ignore */ }
         var rBody2 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-        rBody2.budget_ms = 25000;
+        rBody2.budget_ms = 90000;
         r = await api("/wallet/balance", rBody2);
         if (!r.ok && (r.data?.error === "permit_invalid")) {
           hadAuthFallback = true;
@@ -1365,7 +1365,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
             await syncServerWalletLink(c2.secret_address, "", c2.permit);
             await enableBotBalanceSyncOnServer(c2.secret_address, "", c2.permit);
             var rBody3 = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-            rBody3.budget_ms = 25000;
+            rBody3.budget_ms = 90000;
             const retry = await api("/wallet/balance", rBody3);
             if (retry?.ok) r = retry;
           } catch (_e) { /* ignore */ }
@@ -1408,7 +1408,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
               try {
                 const r2 = await api(
                   "/wallet/balance",
-                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 50000 })
+                  Object.assign({}, bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id }), { budget_ms: 90000 })
                 );
                 if (r2 && r2.ok && r2.data) {
                   const src2 = String(r2.data.source || "");
@@ -1429,12 +1429,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     async function fetchWalletBalanceServerOnly(u) {
       const q = "/wallet/balance?platform=" + encodeURIComponent(u.platform) +
         "&platform_user_id=" + encodeURIComponent(u.platform_user_id) +
-        "&budget_ms=30000&sync_chain=1";
+        "&budget_ms=90000&sync_chain=1";
       return api(q);
     }
     async function fetchWalletBalanceWithFallback(u) {
       const primaryBody = bodyWithCreds({ platform: u.platform, platform_user_id: u.platform_user_id });
-      primaryBody.budget_ms = 25000;
+      primaryBody.budget_ms = 90000;
       let r = await api("/wallet/balance", primaryBody);
       const authErr = r && !r.ok && (r.data?.error === "permit_invalid");
       if (!authErr) return r;
@@ -1442,7 +1442,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const c = getCreds();
       if (c?.secret_address) setCreds(c.secret_address, "", null);
       else clearCreds();
-      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 25000 });
+      return api("/wallet/balance", { platform: u.platform, platform_user_id: u.platform_user_id, budget_ms: 90000 });
     }
     function setBalanceDebug(resp, u) {
       const el = document.getElementById("balanceDebug");
