@@ -716,7 +716,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-22";
+    const SNVR_UI_BUILD = "2026-03-27-23";
 
     const I18N = {
       en: {
@@ -2189,6 +2189,22 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       el.textContent = text;
       el.className = ok ? "success" : "error";
     }
+    let mixDepositInflight = false;
+    let mixClaimInflight = false;
+    function setMixActionBusy(busy, actionLabel) {
+      const dep = document.getElementById("btnMixDeposit");
+      const rec = document.getElementById("btnMixClaimRecommended");
+      const ins = document.getElementById("btnMixClaimInstant");
+      if (dep) dep.disabled = !!busy;
+      if (rec) rec.disabled = !!busy;
+      if (ins) ins.disabled = !!busy;
+      if (busy) {
+        setMixResult(
+          `${actionLabel || "Request"} in progress. Waiting for wallet approval/chain response. Please do not tap repeatedly.`,
+          true
+        );
+      }
+    }
     const MIX_TICKET_KEY = "snvr_routing_tickets";
     function sleepMs(ms) {
       return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -2223,13 +2239,23 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     function markTicketClaimed(ticketHash) {
       const arr = getRoutingTickets();
       for (const t of arr) {
-        if (t.ticket_hash === ticketHash) t.claimed = true;
+        if (t.ticket_hash === ticketHash) {
+          t.claimed = true;
+          t.claiming = false;
+        }
+      }
+      setRoutingTickets(arr);
+    }
+    function markTicketClaiming(ticketHash, claiming) {
+      const arr = getRoutingTickets();
+      for (const t of arr) {
+        if (t.ticket_hash === ticketHash) t.claiming = !!claiming;
       }
       setRoutingTickets(arr);
     }
     function pickClaimableTicketByAmount(amountRaw) {
       const arr = getRoutingTickets();
-      return arr.find((t) => !t.claimed && String(t.amount_raw) === String(amountRaw)) || null;
+      return arr.find((t) => !t.claimed && !t.claiming && String(t.amount_raw) === String(amountRaw)) || null;
     }
     function findTicketByAmount(amountRaw, { claimedOnly } = {}) {
       const arr = getRoutingTickets();
@@ -2246,7 +2272,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const key = String(ticketHash || "").trim();
       if (!key) return null;
       const arr = getRoutingTickets();
-      return arr.find((t) => !t.claimed && String(t.ticket_hash || "") === key) || null;
+      return arr.find((t) => !t.claimed && !t.claiming && String(t.ticket_hash || "") === key) || null;
     }
     function shortHash(h) {
       const v = String(h || "");
@@ -2275,12 +2301,14 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         return Math.max(0, Math.floor((Date.now() - ts) / 60000));
       };
       const pending = arr.filter((t) => !t.claimed);
+      const claiming = arr.filter((t) => !!t.claiming);
+      const pendingClaimable = arr.filter((t) => !t.claimed && !t.claiming);
       const claimed = arr.filter((t) => !!t.claimed);
       const pendingTotalRaw = pending.reduce((acc, t) => acc + Number(t.amount_raw || 0), 0);
-      const claimTarget = pending.length ? pending[0] : null;
+      const claimTarget = pendingClaimable.length ? pendingClaimable[0] : null;
       if (pickEl) {
         const options = ['<option value="">Auto-select by amount (or pick pending ticket below)</option>'];
-        pending.slice(0, 20).forEach((t, i) => {
+        pendingClaimable.slice(0, 20).forEach((t, i) => {
           const dt = new Date(Number(t.created_at || Date.now())).toLocaleString();
           options.push(
             `<option value="${String(t.ticket_hash || "")}">${i + 1}) ${toHuman(t.amount_raw)} SNVR | ${dt} | ${shortHash(t.ticket_hash)}</option>`
@@ -2300,11 +2328,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const rows = arr.slice(0, 5).map((t, i) => {
         const dt = new Date(Number(t.created_at || Date.now())).toLocaleString();
         const minsAgo = ageMin(t.created_at);
-        const st = t.claimed ? "claimed" : "pending";
+        const st = t.claimed ? "claimed" : (t.claiming ? "claiming" : "pending");
         return `${i + 1}) ${toHuman(t.amount_raw)} SNVR | ${st} | ${dt} (${minsAgo} min ago) | ${shortHash(t.ticket_hash)}`;
       });
       el.textContent =
-        `Local routing tickets: total=${arr.length}, pending=${pending.length}, claimed=${claimed.length}, pending_total=${toHuman(pendingTotalRaw)} SNVR\n` +
+        `Local routing tickets: total=${arr.length}, pending=${pending.length}, claiming=${claiming.length}, claimed=${claimed.length}, pending_total=${toHuman(pendingTotalRaw)} SNVR\n` +
         rows.join("\n");
     }
     function humanToRaw(amount, decimals) {
@@ -2560,15 +2588,21 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         const arr = getRoutingTickets();
         const pendingCount = arr.filter((t) => !t.claimed).length;
         el.textContent = pendingCount > 0
-          ? `Pending: chain status check is temporarily unavailable (network/LCD/Keplr). Local pending tickets: ${pendingCount}. You can still claim by selecting a pending ticket below.`
+          ? `Pending: chain status check is temporarily unavailable (network/LCD/Keplr). Local pending tickets: ${pendingCount}. Local ticket list below is still usable; you can claim by selecting a pending ticket.`
           : "Pending: chain status unavailable now (network/LCD/Keplr).";
         renderTicketList();
       }
     }
     async function mixDeposit() {
+      if (mixDepositInflight) {
+        setMixResult("Deposit already in progress. Please wait.", true);
+        return;
+      }
       const amount = parseFloat(document.getElementById("mixAmount").value);
       if (!amount || amount <= 0) return setMixResult("Enter a valid amount.", false);
       try {
+        mixDepositInflight = true;
+        setMixActionBusy(true, "Deposit");
         const { client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils, snvrAddr, snvrCodeHash, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
         const amountRaw = humanToRaw(amount, decimals);
         if (!amountRaw) return setMixResult("Invalid amount.", false);
@@ -2604,9 +2638,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         void scheduleMixPendingRefetch();
       } catch (e) {
         setMixResult(`Deposit failed: ${e.message || String(e)}`, false);
+      } finally {
+        mixDepositInflight = false;
+        if (!mixClaimInflight) setMixActionBusy(false);
       }
     }
     async function mixClaim(requireDelay) {
+      if (mixClaimInflight) {
+        setMixResult("Claim already in progress. Please wait.", true);
+        return;
+      }
+      let inflightTicketHash = "";
       const to = document.getElementById("mixTo").value.trim();
       const amount = parseFloat(document.getElementById("mixAmount").value);
       const selectedHash = String(document.getElementById("mixTicketSelect")?.value || "").trim();
@@ -2624,6 +2666,8 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         if (!accepted) return setMixResult("Cancelled: Privacy Recommended is advised.", false);
       }
       try {
+        mixClaimInflight = true;
+        setMixActionBusy(true, "Claim");
         const { client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils, mixerAddr, mixerCodeHash, decimals } = await getMixClient();
         let amountRaw = humanToRaw(amount, decimals);
         let ticket = selectedHash ? findPendingTicketByHash(selectedHash) : pickClaimableTicketByAmount(amountRaw);
@@ -2651,6 +2695,9 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           `Recipient: ${to}`
         );
         if (!proceed) return setMixResult("Cancelled: claim target review.", false);
+        inflightTicketHash = String(ticket.ticket_hash || "");
+        markTicketClaiming(ticket.ticket_hash, true);
+        renderTicketList();
         const tx = await executeContractWithLcdFallback({
           client, signer, sender, chainId, lcdUrl, lcdCandidates, enigmaUtils,
         }, {
@@ -2666,7 +2713,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         refreshProfileSidebar();
         refreshMixPending();
       } catch (e) {
+        if (inflightTicketHash) markTicketClaiming(inflightTicketHash, false);
         setMixResult(`Claim failed: ${e.message || String(e)}`, false);
+      } finally {
+        mixClaimInflight = false;
+        if (!mixDepositInflight) setMixActionBusy(false);
+        renderTicketList();
       }
     }
     document.getElementById("btnMixDeposit").onclick = mixDeposit;
