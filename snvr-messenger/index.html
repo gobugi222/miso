@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-08";
+    const SNVR_UI_BUILD = "2026-03-27-09";
 
     const I18N = {
       en: {
@@ -1203,6 +1203,15 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
     }
     function getSessionUser() {
+      // Telegram WebView에서는 실제 init user를 최우선 기준으로 강제 정합.
+      try {
+        const tg = getTelegramInitUser();
+        if (tg && tg.id != null) {
+          setUser("telegram", String(tg.id), getApiUrl());
+          const uTg = getUser();
+          if (uTg && uTg.platform && uTg.platform_user_id != null) return uTg;
+        }
+      } catch (_eTg) { /* ignore */ }
       const u = getUser();
       if (u && u.platform && u.platform_user_id != null) return u;
       try {
@@ -1217,7 +1226,11 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const tgUser = getTelegramInitUser();
       if (!tgUser) return false;
       const existing = getUser();
-      if (existing && String(existing.platform_user_id) === String(tgUser.id)) return true;
+      if (existing && String(existing.platform_user_id) === String(tgUser.id)) {
+        // Even when already signed in, refresh canonical user tuple for safety.
+        setUser("telegram", tgUser.id, getApiUrl());
+        return true;
+      }
       // 같은 WebView에 이전 텔레그램 계정 세션/지갑이 남아 다른 유저로 보이는 문제 방지
       if (existing && String(existing.platform_user_id) !== String(tgUser.id)) {
         clearCreds();
