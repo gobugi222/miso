@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-09";
+    const SNVR_UI_BUILD = "2026-03-27-10";
 
     const I18N = {
       en: {
@@ -999,7 +999,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
           var u = new URL(location.href);
           u.searchParams.set("view", "settings");
           u.searchParams.set("keplr_autoconnect", "1");
-          var cur = getUser();
+          var cur = getSessionUser();
           if (cur && cur.platform && cur.platform_user_id != null) {
             u.searchParams.set("platform", String(cur.platform));
             u.searchParams.set("platform_user_id", String(cur.platform_user_id));
