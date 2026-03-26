@@ -19,7 +19,7 @@ import {
 } from "./secret.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = join(__dirname, "../data/db.json");
+const DB_PATH = String(process.env.DB_PATH || join(__dirname, "../data/db.json"));
 
 const app = express();
 app.use(express.json({ limit: "500kb" }));
@@ -162,7 +162,7 @@ function loadDb() {
 
 function saveDb() {
   try {
-    mkdirSync(join(__dirname, "../data"), { recursive: true });
+    mkdirSync(dirname(DB_PATH), { recursive: true });
     const db = {
       users: Object.fromEntries(users),
       walletTxId,
