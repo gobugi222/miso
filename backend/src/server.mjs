@@ -19,7 +19,7 @@ import {
 } from "./secret.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = join(__dirname, "../data/db.json");
+const DB_PATH = String(process.env.DB_PATH || join(__dirname, "../data/db.json"));
 
 const app = express();
 app.use(express.json({ limit: "500kb" }));
@@ -125,6 +125,46 @@ app.get("/wallet/chain-config", (req, res) => {
   }
 });
 
+// Debug helper: run permit probe once and return reason.
+// This avoids "pending_chain" ambiguity and lets us see PERMIT_INVALID vs LCD timeout quickly.
+app.get("/wallet/permit-probe", async (req, res) => {
+  const platform = req.query.platform || "telegram";
+  const platform_user_id = req.query.platform_user_id;
+  const budgetMs = clampInt(req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? 25000;
+  if (!platform_user_id) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  }
+  const u = ensureUser(platform, platform_user_id);
+  if (!u.secret_address || !u.permit) {
+    return res.json({
+      ok: true,
+      has_secret_link: false,
+      secret_address: u.secret_address || null,
+      permit: !!u.permit,
+      permit_probe: { ok: false, error_code: "MISSING_LINK" },
+    });
+  }
+  try {
+    const probe = await withChainBudget(getSnvrBalanceWithPermitProbe(u.secret_address, u.permit), Math.min(30000, budgetMs));
+    return res.json({
+      ok: true,
+      has_secret_link: true,
+      secret_address: u.secret_address,
+      permit_probe: probe,
+    });
+  } catch (e) {
+    const payload = isBalanceBudgetError(e)
+      ? { ok: false, error_code: "BUDGET" }
+      : { ok: false, error_code: "PROBE_FAILED", errors: [String(e?.message || e)] };
+    return res.json({
+      ok: true,
+      has_secret_link: true,
+      secret_address: u.secret_address,
+      permit_probe: payload,
+    });
+  }
+});
+
 // ——— 지갑·송금 (플랫폼 무관: telegram / snvr_messenger 등 동일 API)
 let users = new Map();
 const oneTimeCodes = new Map();
@@ -162,7 +202,7 @@ function loadDb() {
 
 function saveDb() {
   try {
-    mkdirSync(join(__dirname, "../data"), { recursive: true });
+    mkdirSync(dirname(DB_PATH), { recursive: true });
     const db = {
       users: Object.fromEntries(users),
       walletTxId,
