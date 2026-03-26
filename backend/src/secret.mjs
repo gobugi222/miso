@@ -85,8 +85,8 @@ function loadConfig() {
     }
   }
   config = {
-    snvr_token: full.snvr_token,
-    snvr_code_hash: full.snvr_code_hash,
+    snvr_token: full.snvr_token || process.env.SNVR_TOKEN || null,
+    snvr_code_hash: full.snvr_code_hash || process.env.SNVR_CODE_HASH || null,
     mixer_address: full.mixer_address,
     mixer_code_hash: full.mixer_code_hash,
     router_address: ghost.ghostswap_router_address,
@@ -160,6 +160,65 @@ export async function getSnvrBalance(address, viewingKey) {
   return null;
 }
 
+async function fetchPermitBalanceViaGateway(addr, permit) {
+  const base = (process.env.QUERY_GATEWAY_URL || "").trim().replace(/\/$/, "");
+  if (!base) return null;
+  const c = loadConfig();
+  const token = (process.env.QUERY_GATEWAY_TOKEN || "").trim();
+  const clientMs = Math.max(5000, Math.min(60000, Number(process.env.QUERY_GATEWAY_CLIENT_TIMEOUT_MS) || 25000));
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), clientMs);
+  try {
+    const res = await fetch(base + "/v1/snvr/balance", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+      body: JSON.stringify({
+        chain_id: c.chain_id,
+        lcd_urls: getLcdCandidates(),
+        contract: { address: c.snvr_token, code_hash: c.snvr_code_hash, decimals: DECIMALS },
+        wallet_address: addr,
+        permit,
+        // Gateway LCD 레이스용; 8s 캡은 slow LCD에서 전부 타임아웃나 permit 조회 실패로 이어짐 (max 20s)
+        timeout_ms: Math.min(Math.max(LCD_PROBE_PER_URL_MS, 8000), 20000),
+        cache_ttl_ms: BAL_CACHE_TTL_MS,
+      }),
+      signal: controller.signal,
+    });
+    const rawText = await res.text().catch(() => "");
+    let data = {};
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      console.warn("[query-gateway] HTTP", res.status, rawText?.slice(0, 240) || "(empty)");
+      const err = String(data?.error || "");
+      if (err === "permit_invalid" || err.includes("permit")) throw new Error("PERMIT_INVALID");
+      return null;
+    }
+    if (data && data.ok && data.balance_amount != null) {
+      const amount = String(data.balance_amount);
+      try {
+        balCache.set(addr, { at: Date.now(), amount });
+      } catch (_e) { /* ignore */ }
+      return amount;
+    }
+    const err = String(data?.error || "");
+    if (err === "permit_invalid" || err.includes("permit")) throw new Error("PERMIT_INVALID");
+    return null;
+  } catch (e) {
+    if (e?.message === "PERMIT_INVALID") throw e;
+    if (e?.name === "AbortError") console.warn("[query-gateway] fetch aborted (client timeout " + clientMs + "ms)");
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 /** SNIP-20 잔액 조회 (address + permit) */
 export async function getSnvrBalanceWithPermit(address, permit) {
   const c = loadConfig();
@@ -172,6 +231,14 @@ export async function getSnvrBalanceWithPermit(address, permit) {
     const cached = balCache.get(addr);
     if (cached && Date.now() - Number(cached.at || 0) < BAL_CACHE_TTL_MS) return String(cached.amount ?? "0");
   } catch (_eCache) { /* ignore */ }
+
+  // 1) Query Gateway (US VPS 등) — 설정 시 LCD 직접 호출보다 우선
+  try {
+    const viaGw = await fetchPermitBalanceViaGateway(addr, permit);
+    if (viaGw != null) return viaGw;
+  } catch (e) {
+    if (e?.message === "PERMIT_INVALID") throw e;
+  }
 
   const urls = getLcdCandidates();
   const queryOnUrl = async (url) => {

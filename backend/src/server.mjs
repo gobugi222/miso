@@ -338,8 +338,14 @@ app.get("/wallet/balance", async (req, res) => {
           const human = Number(raw) / 1e9;
           rememberChainBalance(u, human);
           saveDb();
+        } else {
+          console.warn("[balance] chain_refresh GET: null", userKey);
         }
-      } catch (_e) { /* ignore */ }
+      } catch (e) {
+        if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh GET: PERMIT_INVALID", userKey);
+        else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh GET: BUDGET", userKey, budgetMs + "ms");
+        else console.warn("[balance] chain_refresh GET:", userKey, String(e?.message || e));
+      }
     });
   }
   const out = {
@@ -383,12 +389,15 @@ function parsePermitInput(rawPermit) {
   }
 }
 
+const GW_URL_CONFIGURED = Boolean((process.env.QUERY_GATEWAY_URL || "").trim());
+
 /** 메신저 Zero-Log: 클라이언트가 permit만 담아 보냄. 저장 안 함. */
 app.post("/wallet/balance", async (req, res) => {
   const { platform = "telegram", platform_user_id, secret_address, permit: rawPermit, debug_permit } = req.body || {};
   const permit = parsePermitInput(rawPermit);
   const debugPermit = String(debug_permit || "") === "1";
-  const budgetMs = clampInt(req.body?.budget_ms ?? req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? 8000;
+  const defaultPostBudget = GW_URL_CONFIGURED ? 28000 : 8000;
+  const budgetMs = clampInt(req.body?.budget_ms ?? req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? defaultPostBudget;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
   const fbBal = getFallbackBalance(u);
@@ -414,8 +423,14 @@ app.post("/wallet/balance", async (req, res) => {
             const human = Number(chainBal) / 1e9;
             rememberChainBalance(u, human);
             saveDb();
+          } else {
+            console.warn("[balance] chain_refresh post: null (gateway/LCD 모두 실패 또는 설정 없음)", userKey);
           }
-        } catch (_e) { /* ignore */ }
+        } catch (e) {
+          if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh post: PERMIT_INVALID", userKey);
+          else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh post: BUDGET", userKey, budgetMs + "ms");
+          else console.warn("[balance] chain_refresh post:", userKey, String(e?.message || e));
+        }
       });
     }
     return res.json({
@@ -438,8 +453,14 @@ app.post("/wallet/balance", async (req, res) => {
             const human = Number(chainBal) / 1e9;
             rememberChainBalance(u, human);
             saveDb();
+          } else {
+            console.warn("[balance] chain_refresh stored: null", userKey);
           }
-        } catch (_e) { /* ignore */ }
+        } catch (e) {
+          if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh stored: PERMIT_INVALID", userKey);
+          else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh stored: BUDGET", userKey, budgetMs + "ms");
+          else console.warn("[balance] chain_refresh stored:", userKey, String(e?.message || e));
+        }
       });
     }
     return res.json({
