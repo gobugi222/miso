@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-04";
+    const SNVR_UI_BUILD = "2026-03-27-05";
 
     const I18N = {
       en: {
@@ -2923,6 +2923,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       var hint = document.getElementById("keplrOpenHint");
       try { localStorage.setItem(KEPLR_PENDING_KEY, "1"); } catch (_e) { /* ignore */ }
       setKeplrFlowStatus("opened_keplr_link");
+      startPendingServerPoll("opened_keplr_link");
       if (hint) {
         hint.classList.remove("hidden");
         hint.className = "search-hint";
@@ -2971,11 +2972,68 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (btn) btn.click();
     };
     let keplrReturnCheckBusy = false;
+    let keplrPendingServerPollTimer = null;
+    let keplrPendingServerPollBusy = false;
+    function stopPendingServerPoll() {
+      if (keplrPendingServerPollTimer) {
+        clearInterval(keplrPendingServerPollTimer);
+        keplrPendingServerPollTimer = null;
+      }
+    }
+    async function trySyncPendingFromServer(reason) {
+      try {
+        if (keplrPendingServerPollBusy) return false;
+        keplrPendingServerPollBusy = true;
+        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
+        if (!pending) {
+          stopPendingServerPoll();
+          return false;
+        }
+        var u = getUser();
+        if (!u) return false;
+        var q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
+        var r = await api("/wallet/bot-balance-sync?" + q);
+        var linked = !!(r.ok && (r.data?.has_secret_link || r.data?.enabled) && r.data?.secret_address && r.data?.permit);
+        if (!linked) {
+          setKeplrFlowStatus(String(reason || "waiting_server_sync"));
+          return false;
+        }
+        await hydrateCredsFromServer();
+        await refreshBalance();
+        refreshProfileSidebar();
+        loadBotBalanceSync();
+        try { localStorage.removeItem(KEPLR_PENDING_KEY); } catch (_e) { /* ignore */ }
+        setKeplrFlowStatus("connected_server_sync");
+        stopPendingServerPoll();
+        return true;
+      } catch (_e) {
+        return false;
+      } finally {
+        keplrPendingServerPollBusy = false;
+      }
+    }
+    function startPendingServerPoll(reason) {
+      try {
+        var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
+        if (!pending) return;
+        if (!keplrPendingServerPollTimer) {
+          void trySyncPendingFromServer(reason || "pending_server_poll");
+          keplrPendingServerPollTimer = setInterval(function () {
+            void trySyncPendingFromServer("pending_server_poll");
+          }, 3500);
+          setTimeout(function () { stopPendingServerPoll(); }, 90000);
+        }
+      } catch (_e) { /* ignore */ }
+    }
     function triggerPendingKeplrCheck(reason) {
       try {
         if (keplrReturnCheckBusy) return;
         var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
-        if (!pending || !window.keplr) return;
+        if (!pending) return;
+        if (!window.keplr) {
+          startPendingServerPoll(reason || "pending_server_poll");
+          return;
+        }
         keplrReturnCheckBusy = true;
         setKeplrFlowStatus(String(reason || "pending_recheck"));
         var btn = document.getElementById("btnKeplrConnect");
@@ -3007,6 +3065,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       } catch (_e) {
         setKeplrFlowStatus("idle");
       }
+      startPendingServerPoll("restore_pending");
     })();
     window.addEventListener("pageshow", function () {
       triggerPendingKeplrCheck("pageshow_recheck");
