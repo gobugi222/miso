@@ -37,6 +37,7 @@ const USE_SECRET = process.env.SECRET_NETWORK === "1" && isSecretEnabled();
 
 // Balance: keep API responsive even when LCD is slow.
 const BALANCE_CHAIN_BUDGET_MS = Math.max(5000, Math.min(260000, Number(process.env.BALANCE_CHAIN_BUDGET_MS) || 90000));
+const GW_URL_CONFIGURED = Boolean((process.env.QUERY_GATEWAY_URL || "").trim());
 function clampInt(n, min, max) {
   const x = Number(n);
   if (!Number.isFinite(x)) return null;
@@ -226,14 +227,22 @@ function getFallbackBalance(u) {
 }
 
 const inflightChain = new Map();
+/** 이미 같은 key로 갱신 중이면 새 작업은 스킵하지만 true를 반환해 pending_chain은 유지한다(auth=- 오표시 방지). */
 function scheduleChainRefresh(userKey, fn) {
-  if (inflightChain.get(userKey)) return false;
+  if (inflightChain.get(userKey)) return true;
   inflightChain.set(userKey, true);
   Promise.resolve()
     .then(fn)
     .catch((_e) => {})
     .finally(() => inflightChain.delete(userKey));
   return true;
+}
+
+function walletBalanceView(u) {
+  const fbBal = getFallbackBalance(u);
+  const hasCachedChain = Number.isFinite(Number(u.last_chain_balance)) && Number(u.last_chain_balance) >= 0 && Number(u.last_chain_at || 0) > 0;
+  const immediate = hasCachedChain ? Math.max(fbBal, Number(u.last_chain_balance)) : fbBal;
+  return { hasCachedChain, immediate, fbBal };
 }
 
 const CHAT_NOTIFY_MSG = {
@@ -314,22 +323,19 @@ app.get("/wallet/balance", async (req, res) => {
   const platform_user_id = req.query.platform_user_id;
   const locale = (req.query.locale || "en").toLowerCase().slice(0, 5);
   const debugPermit = String(req.query.debug_permit || "") === "1";
-  const budgetMs = clampInt(req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? 25000;
+  const syncChain = String(req.query.sync_chain || "") === "1";
+  const defaultGetBudget = GW_URL_CONFIGURED ? 28000 : 25000;
+  const budgetMs = clampInt(req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? defaultGetBudget;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, platformKey(platform, platform_user_id)), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
-  const memBal = Number(u.balance || 0);
-  const fbBal = getFallbackBalance(u);
   const chainLinked = Boolean(u.secret_address && (u.viewing_key || u.permit));
   if (locale && ["en", "ko", "ja"].includes(locale)) u.locale = locale;
-  // Fast response: return cached chain (last_chain_balance) if present; never block on LCD.
-  const hasCachedChain = Number.isFinite(Number(u.last_chain_balance)) && Number(u.last_chain_balance) >= 0 && Number(u.last_chain_at || 0) > 0;
-  const immediate = hasCachedChain ? Math.max(fbBal, Number(u.last_chain_balance)) : fbBal;
+  let v = walletBalanceView(u);
   const userKey = platformKey(platform, platform_user_id);
   let pending_chain = false;
-  // Background refresh when linked and cache is stale (>15s) or missing.
-  const stale = !hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
+  const stale = !v.hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
   if (stale && u.secret_address && (u.permit || u.viewing_key)) {
-    pending_chain = scheduleChainRefresh(userKey, async () => {
+    if (syncChain) {
       try {
         let raw = null;
         if (u.permit) raw = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
@@ -339,21 +345,41 @@ app.get("/wallet/balance", async (req, res) => {
           rememberChainBalance(u, human);
           saveDb();
         } else {
-          console.warn("[balance] chain_refresh GET: null", userKey);
+          console.warn("[balance] sync_chain GET: null", userKey);
         }
       } catch (e) {
-        if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh GET: PERMIT_INVALID", userKey);
-        else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh GET: BUDGET", userKey, budgetMs + "ms");
-        else console.warn("[balance] chain_refresh GET:", userKey, String(e?.message || e));
+        if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain GET: PERMIT_INVALID", userKey);
+        else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain GET: BUDGET", userKey, budgetMs + "ms");
+        else console.warn("[balance] sync_chain GET:", userKey, String(e?.message || e));
       }
-    });
+      v = walletBalanceView(u);
+    } else {
+      pending_chain = scheduleChainRefresh(userKey, async () => {
+        try {
+          let raw = null;
+          if (u.permit) raw = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
+          else if (u.viewing_key) raw = await withChainBudget(getSnvrBalance(u.secret_address, u.viewing_key), budgetMs);
+          if (raw != null) {
+            const human = Number(raw) / 1e9;
+            rememberChainBalance(u, human);
+            saveDb();
+          } else {
+            console.warn("[balance] chain_refresh GET: null", userKey);
+          }
+        } catch (e) {
+          if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh GET: PERMIT_INVALID", userKey);
+          else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh GET: BUDGET", userKey, budgetMs + "ms");
+          else console.warn("[balance] chain_refresh GET:", userKey, String(e?.message || e));
+        }
+      });
+    }
   }
   const out = {
     ok: true,
     chain_linked: chainLinked,
-    balance: immediate,
-    source: hasCachedChain ? "cached_chain" : "memory_fallback",
-    auth: hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
+    balance: v.immediate,
+    source: v.hasCachedChain ? "cached_chain" : "memory_fallback",
+    auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
     pending_chain,
   };
   if (debugPermit && u.secret_address && u.permit) {
@@ -371,14 +397,16 @@ function parsePermitInput(rawPermit) {
     if (!obj || typeof obj !== "object") return null;
     const exp = Number(obj.expires_at || 0);
     if (Number.isFinite(exp) && exp > 0 && exp <= Date.now()) return null;
-    // Session metadata may exist on client; query permit must be pure { params, signature }.
+    // Session metadata may exist on client; secretjs permit verification may expect full fields.
     const params = obj.params;
     const signature = obj.signature;
     if (!params || !signature || typeof params !== "object" || typeof signature !== "object") return null;
-    return { params, signature };
+    // Keep original shape (expires_at/issued_at/etc) but ensure params/signature exist.
+    return { ...obj, params, signature };
   };
   if (typeof rawPermit === "object") {
-    return sanitizePermit(rawPermit);
+    const inner = rawPermit.permit && typeof rawPermit.permit === "object" ? rawPermit.permit : rawPermit;
+    return sanitizePermit(inner);
   }
   if (typeof rawPermit !== "string") return null;
   try {
@@ -389,34 +417,31 @@ function parsePermitInput(rawPermit) {
   }
 }
 
-const GW_URL_CONFIGURED = Boolean((process.env.QUERY_GATEWAY_URL || "").trim());
-
 /** 메신저 Zero-Log: 클라이언트가 permit만 담아 보냄. 저장 안 함. */
 app.post("/wallet/balance", async (req, res) => {
   const { platform = "telegram", platform_user_id, secret_address, permit: rawPermit, debug_permit } = req.body || {};
   const permit = parsePermitInput(rawPermit);
   const debugPermit = String(debug_permit || "") === "1";
+  const syncChain =
+    String(req.body?.sync_chain ?? req.query?.sync_chain ?? "") === "1" || req.body?.sync_chain === true;
   const defaultPostBudget = GW_URL_CONFIGURED ? 28000 : 8000;
   const budgetMs = clampInt(req.body?.budget_ms ?? req.query.budget_ms, 5000, BALANCE_CHAIN_BUDGET_MS) ?? defaultPostBudget;
   if (!platform_user_id) return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   const u = ensureUser(platform, platform_user_id);
-  const fbBal = getFallbackBalance(u);
   const chainLinked = Boolean(u.secret_address && u.permit);
   const userKey = platformKey(platform, platform_user_id);
-  const hasCachedChain = Number.isFinite(Number(u.last_chain_balance)) && Number(u.last_chain_balance) >= 0 && Number(u.last_chain_at || 0) > 0;
-  const stale = !hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
-  const immediate = hasCachedChain ? Math.max(fbBal, Number(u.last_chain_balance)) : fbBal;
+  let v = walletBalanceView(u);
+  const stale = !v.hasCachedChain || (Date.now() - Number(u.last_chain_at || 0) > 15000);
   // 1) permit 우선
   if (secret_address && permit) {
     if (debugPermit) {
-      // Probe는 응답을 막지 않게 백그라운드로만 돌린다.
       scheduleChainRefresh(userKey + "::probe", async () => {
         try { await withChainBudget(getSnvrBalanceWithPermitProbe(secret_address, permit), budgetMs); } catch (_e) {}
       });
     }
     let pending_chain = false;
     if (stale) {
-      pending_chain = scheduleChainRefresh(userKey + "::post", async () => {
+      if (syncChain) {
         try {
           const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit), budgetMs);
           if (chainBal != null) {
@@ -424,29 +449,50 @@ app.post("/wallet/balance", async (req, res) => {
             rememberChainBalance(u, human);
             saveDb();
           } else {
-            console.warn("[balance] chain_refresh post: null (gateway/LCD 모두 실패 또는 설정 없음)", userKey);
+            console.warn("[balance] sync_chain post: null", userKey);
           }
         } catch (e) {
-          if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh post: PERMIT_INVALID", userKey);
-          else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh post: BUDGET", userKey, budgetMs + "ms");
-          else console.warn("[balance] chain_refresh post:", userKey, String(e?.message || e));
+          if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain post: PERMIT_INVALID", userKey);
+          else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain post: BUDGET", userKey, budgetMs + "ms");
+          else console.warn("[balance] sync_chain post:", userKey, String(e?.message || e));
         }
-      });
+        v = walletBalanceView(u);
+      } else {
+        pending_chain = scheduleChainRefresh(userKey + "::post", async () => {
+          try {
+            const chainBal = await withChainBudget(getSnvrBalanceWithPermit(secret_address, permit), budgetMs);
+            if (chainBal != null) {
+              const human = Number(chainBal) / 1e9;
+              rememberChainBalance(u, human);
+              saveDb();
+            } else {
+              console.warn("[balance] chain_refresh post: null (gateway/LCD 모두 실패 또는 설정 없음)", userKey);
+            }
+          } catch (e) {
+            if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh post: PERMIT_INVALID", userKey);
+            else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh post: BUDGET", userKey, budgetMs + "ms");
+            else console.warn("[balance] chain_refresh post:", userKey, String(e?.message || e));
+          }
+        });
+      }
     }
     return res.json({
       ok: true,
       chain_linked: true,
-      balance: immediate,
-      source: hasCachedChain ? "cached_chain" : "memory_fallback",
-      auth: hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
+      balance: v.immediate,
+      source: v.hasCachedChain ? "cached_chain" : "memory_fallback",
+      auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
       pending_chain,
     });
+  }
+  if (rawPermit && secret_address && !permit) {
+    console.warn("[balance] POST: secret_address 있으나 permit 파싱 실패 (클라이언트 permit 형식 확인)", userKey);
   }
   // 2) 저장된 기존 링크(permit) fallback
   if (u.secret_address && u.permit) {
     let pending_chain = false;
     if (stale) {
-      pending_chain = scheduleChainRefresh(userKey + "::stored", async () => {
+      if (syncChain) {
         try {
           const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
           if (chainBal != null) {
@@ -454,25 +500,44 @@ app.post("/wallet/balance", async (req, res) => {
             rememberChainBalance(u, human);
             saveDb();
           } else {
-            console.warn("[balance] chain_refresh stored: null", userKey);
+            console.warn("[balance] sync_chain stored: null", userKey);
           }
         } catch (e) {
-          if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh stored: PERMIT_INVALID", userKey);
-          else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh stored: BUDGET", userKey, budgetMs + "ms");
-          else console.warn("[balance] chain_refresh stored:", userKey, String(e?.message || e));
+          if (e?.message === "PERMIT_INVALID") console.warn("[balance] sync_chain stored: PERMIT_INVALID", userKey);
+          else if (isBalanceBudgetError(e)) console.warn("[balance] sync_chain stored: BUDGET", userKey, budgetMs + "ms");
+          else console.warn("[balance] sync_chain stored:", userKey, String(e?.message || e));
         }
-      });
+        v = walletBalanceView(u);
+      } else {
+        pending_chain = scheduleChainRefresh(userKey + "::stored", async () => {
+          try {
+            const chainBal = await withChainBudget(getSnvrBalanceWithPermit(u.secret_address, u.permit), budgetMs);
+            if (chainBal != null) {
+              const human = Number(chainBal) / 1e9;
+              rememberChainBalance(u, human);
+              saveDb();
+            } else {
+              console.warn("[balance] chain_refresh stored: null", userKey);
+            }
+          } catch (e) {
+            if (e?.message === "PERMIT_INVALID") console.warn("[balance] chain_refresh stored: PERMIT_INVALID", userKey);
+            else if (isBalanceBudgetError(e)) console.warn("[balance] chain_refresh stored: BUDGET", userKey, budgetMs + "ms");
+            else console.warn("[balance] chain_refresh stored:", userKey, String(e?.message || e));
+          }
+        });
+      }
     }
     return res.json({
       ok: true,
       chain_linked: chainLinked,
-      balance: immediate,
-      source: hasCachedChain ? "cached_chain" : "memory_fallback",
-      auth: hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
+      balance: v.immediate,
+      source: v.hasCachedChain ? "cached_chain" : "memory_fallback",
+      auth: v.hasCachedChain ? "cached" : (pending_chain ? "chain_refreshing" : "-"),
       pending_chain,
     });
   }
-  return res.json({ ok: true, chain_linked: chainLinked, balance: fbBal, source: "memory" });
+  const v0 = walletBalanceView(u);
+  return res.json({ ok: true, chain_linked: chainLinked, balance: v0.immediate, source: "memory" });
 });
 
 /** 체인 연동 시 체인 잔액, 아니면 메모리 잔액 (mix/swap 잔액 검사용) */
@@ -1216,6 +1281,19 @@ app.get("/health", (_, res) => res.json({ ok: true, mock: MOCK }));
 
 app.listen(PORT, () => {
   console.log(`Snvr backend on http://localhost:${PORT} (mock=${MOCK}, secret=${USE_SECRET})`);
+  try {
+    const c = loadConfig();
+    if (process.env.SECRET_NETWORK === "1") {
+      if (c?.snvr_token && c?.snvr_code_hash) {
+        console.log("  [SNVR] 컨트랙트 로드됨:", String(c.snvr_token).slice(0, 16) + "…");
+      } else {
+        console.warn("  [SNVR] 컨트랙트 없음 → deploy-full 경로 확인 또는 Railway에 SNVR_TOKEN / SNVR_CODE_HASH 설정");
+      }
+    }
+    if (GW_URL_CONFIGURED) console.log("  [Gateway]", (process.env.QUERY_GATEWAY_URL || "").trim());
+  } catch (_e) {
+    /* ignore */
+  }
   if (TELEGRAM_BOT_TOKEN) console.log("  [송금알림] 텔레그램 봇 토큰 로드됨 → 입금 시 텔레그램 알림 전송 가능");
   else console.warn("  [송금알림] TELEGRAM_BOT_TOKEN 없음 → backend/.env 또는 telegram-bot/.env의 BOT_TOKEN 필요");
 });
