@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-06";
+    const SNVR_UI_BUILD = "2026-03-27-07";
 
     const I18N = {
       en: {
@@ -1033,7 +1033,45 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         hint.classList.remove("hidden");
         hint.className = "search-hint";
         hint.style.color = "#7ee787";
-        hint.textContent = "Connected. Return to SNVR Messenger app manually.";
+        hint.textContent = "Connected. This page will try to close automatically, then return to SNVR Messenger.";
+      }
+      // In Keplr auto-connect page, try close -> back so users don't manually manage two tabs.
+      if (!isKeplrAutoConnectMode()) return;
+      setTimeout(function () {
+        try { window.close(); } catch (_e) { /* ignore */ }
+        setTimeout(function () {
+          try { history.back(); } catch (_e2) { /* ignore */ }
+        }, 450);
+      }, 600);
+    }
+    function tryClickKeplrConnectButton() {
+      try {
+        showView("settings");
+        var btn = document.getElementById("btnKeplrConnect");
+        if (btn) btn.click();
+      } catch (_e) { /* ignore */ }
+    }
+    function startKeplrAutoConnectRetry() {
+      try {
+        var tries = 0;
+        var maxTries = 8; // ~20s
+        var timer = setInterval(function () {
+          tries += 1;
+          if (hasWalletAuthCreds(getCreds()) || tries >= maxTries) {
+            clearInterval(timer);
+            return;
+          }
+          tryClickKeplrConnectButton();
+        }, 2500);
+        setTimeout(function () { try { clearInterval(timer); } catch (_e) {} }, 22000);
+      } catch (_e) { /* ignore */ }
+    }
+    function isKeplrAutoConnectMode() {
+      try {
+        var q = new URLSearchParams(location.search);
+        return q.get("keplr_autoconnect") === "1";
+      } catch (_e) {
+        return false;
       }
     }
     async function pasteIntoInput(inputEl) {
@@ -3065,14 +3103,17 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
         var fromQuery = q.get("keplr_autoconnect") === "1";
         var pending = localStorage.getItem(KEPLR_PENDING_KEY) === "1";
         if (!fromQuery && !pending) return;
-        if (!window.keplr) return;
+        if (!window.keplr) {
+          // Keplr object can appear after wallet unlock; keep retrying briefly.
+          startKeplrAutoConnectRetry();
+          return;
+        }
         if (sessionStorage.getItem("snvr_keplr_autoconnect_done") === "1" && !pending) return;
         setKeplrFlowStatus("autoconnect_attempt");
         sessionStorage.setItem("snvr_keplr_autoconnect_done", "1");
         setTimeout(function () {
-          showView("settings");
-          var btn = document.getElementById("btnKeplrConnect");
-          if (btn) btn.click();
+          tryClickKeplrConnectButton();
+          startKeplrAutoConnectRetry();
         }, 450);
       } catch (_e) { /* ignore */ }
     })();
