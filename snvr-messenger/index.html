@@ -713,7 +713,7 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     const LANG_KEY = "snvr_messenger_lang";
     const DEFAULT_API_URL = "https://api.snvr.org";
     /** Pages에 올린 index.html이 이 값으로 바뀌었는지 Debug 줄에서 확인 (캐시/구버전 업로드 판별용). */
-    const SNVR_UI_BUILD = "2026-03-27-02";
+    const SNVR_UI_BUILD = "2026-03-27-03";
 
     const I18N = {
       en: {
@@ -1123,6 +1123,12 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
     }
     function setUser(platform, platform_user_id, apiUrl) {
+      try {
+        const prev = getUser();
+        if (prev && String(prev.platform_user_id) !== String(platform_user_id)) {
+          clearCreds();
+        }
+      } catch (_e) { /* ignore */ }
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ platform, platform_user_id }));
       if (apiUrl) localStorage.setItem(API_URL_KEY, apiUrl);
     }
@@ -1141,10 +1147,15 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       }
     }
     async function tryTelegramAutoSignIn() {
-      const existing = getUser();
-      if (existing && existing.platform_user_id) return true;
       const tgUser = getTelegramInitUser();
       if (!tgUser) return false;
+      const existing = getUser();
+      if (existing && String(existing.platform_user_id) === String(tgUser.id)) return true;
+      // 같은 WebView에 이전 텔레그램 계정 세션/지갑이 남아 다른 유저로 보이는 문제 방지
+      if (existing && String(existing.platform_user_id) !== String(tgUser.id)) {
+        clearCreds();
+        clearUser();
+      }
       const registerBody = {
         platform: "telegram",
         platform_user_id: tgUser.id,
@@ -1216,13 +1227,16 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       const prev = getCreds() || {};
       const q = "platform=" + encodeURIComponent(u.platform) + "&platform_user_id=" + encodeURIComponent(u.platform_user_id);
       const syncR = await api("/wallet/bot-balance-sync?" + q);
-      let addr = syncR.ok ? String(syncR.data?.secret_address || "").trim() : "";
-      if (!addr) addr = String(prev.secret_address || "").trim();
-      if (!addr) return;
-      const permitFromServer = syncR.ok ? (syncR.data?.permit || null) : null;
-      const permit = permitFromServer || prev.permit || null;
-      if (permit) {
-        setCreds(addr, "", permit);
+      if (!syncR.ok) return;
+      const addr = String(syncR.data?.secret_address || "").trim();
+      const permitFromServer = syncR.data?.permit || null;
+      const linked = !!(syncR.data?.has_secret_link || syncR.data?.enabled);
+      if (addr && permitFromServer) {
+        setCreds(addr, "", permitFromServer);
+        return;
+      }
+      if (!linked || (!addr && !permitFromServer)) {
+        if (prev.secret_address || isPermitSessionValid(prev.permit)) clearCreds();
       }
     }
     function myKey() {
