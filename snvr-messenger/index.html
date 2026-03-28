@@ -2138,10 +2138,31 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!r.ok && hasWalletAuthCreds(getCreds()) && /wallet|지갑|Keplr|linked|연결|sender|not connected/i.test(String(failMsg))) {
         failMsg += " — If you just connected, open ⚙️ Settings and tap Connect Keplr once more.";
       }
+      if (r.ok && r.data && r.data.requires_keplr) {
+        el.textContent = "Keplr 승인 대기… (본인 지갑에서 SNVR 전송)";
+        el.className = "search-hint";
+        try {
+          const txh = await keplrSnip20Transfer(r.data.recipient_secret, r.data.amount_raw);
+          const ackBody = Object.assign({}, body, { tx_hash: txh, recipient_secret: r.data.recipient_secret });
+          const ack = await api("/wallet/send/ack", bodyWithCreds(ackBody));
+          if (!ack.ok) {
+            el.textContent = (ack.data && (ack.data.message || ack.data.error)) || "알림 동기화 실패 (체인 전송은 성공했을 수 있음)";
+            el.className = "error";
+            return;
+          }
+          el.textContent = "✅ 전송 완료 (내 지갑) · tx: " + txh + " · 잔액: " + ack.data.from_balance;
+          el.className = "success";
+          refreshBalance();
+          refreshProfileSidebar();
+          loadHistory();
+        } catch (e) {
+          el.textContent = "Keplr/전송 실패: " + (e.message || String(e));
+          el.className = "error";
+        }
+        return;
+      }
       if (r.ok) {
-        var sentMsg = r.data.relay_mode
-          ? "✅ 전송됨(서버 릴레이). 사용 가능 잔액: " + r.data.from_balance + " — Keplr에 보이는 SNVR는 그대로일 수 있어요(체인 출금은 운영 지갑)."
-          : "✅ Sent. Balance: " + r.data.from_balance;
+        var sentMsg = "✅ Sent. Balance: " + r.data.from_balance;
         if (r.data.txHash) sentMsg += " · tx: " + r.data.txHash;
         el.textContent = sentMsg;
       } else el.textContent = failMsg;
@@ -2182,6 +2203,46 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       el.classList.remove("hidden");
       if (!to || !amount || amount <= 0) { el.textContent = "Enter recipient and amount."; el.className = "error"; return; }
       const r = await api("/swap", bodyWithCreds({ platform: u.platform, from_platform_user_id: u.platform_user_id, amount, recipient: to }));
+      if (r.ok && r.data && r.data.requires_keplr) {
+        var isAmm = r.data.swap_kind === "amm_scrt_to_snvr";
+        var scrtLine = "";
+        if (isAmm && r.data.offer_uscrt_amount) {
+          scrtLine = " 약 " + (Number(r.data.offer_uscrt_amount) / 1e6).toFixed(4) + " SCRT(Keplr) 사용 → ";
+        }
+        el.textContent = "Keplr 승인 대기…" + scrtLine + "수령인 ~" + r.data.to_receive + " SNVR" + (isAmm ? " (AMM)" : "");
+        el.className = "search-hint";
+        try {
+          var txh = isAmm ? await keplrGhostswapAmmSwap(r.data) : await keplrSnip20Transfer(r.data.recipient_secret, r.data.amount_raw);
+          const ack = await api(
+            "/swap/ack",
+            bodyWithCreds({
+              platform: u.platform,
+              from_platform_user_id: u.platform_user_id,
+              recipient: to,
+              amount: r.data.amount_gross,
+              to_receive: r.data.to_receive,
+              fee: r.data.fee,
+              tx_hash: txh,
+              recipient_secret: r.data.recipient_secret,
+              swap_kind: r.data.swap_kind || undefined,
+            })
+          );
+          if (!ack.ok) {
+            el.textContent = (ack.data && (ack.data.message || ack.data.error)) || "Swap ack failed";
+            el.className = "error";
+            return;
+          }
+          el.textContent = "✅ GhostSwap(AMM) 완료 · 상대 수령 약 " + r.data.to_receive + " SNVR · tx: " + txh;
+          el.className = "success";
+          refreshBalance();
+          refreshProfileSidebar();
+          loadHistory();
+        } catch (e) {
+          el.textContent = "Keplr/스왑 실패: " + (e.message || String(e));
+          el.className = "error";
+        }
+        return;
+      }
       el.textContent = r.ok ? `✅ Swap done. Recipient receives: ${r.data.to_receive}` : (r.data?.message || r.data?.error || "Failed");
       el.className = r.ok ? "success" : "error";
       if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
@@ -2499,6 +2560,104 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
     function isFetchLikeError(e) {
       const m = String(e?.message || e || "").toLowerCase();
       return m.includes("failed to fetch") || m.includes("networkerror") || m.includes("network request failed") || m.includes("fetch");
+    }
+    async function getSnvrTransferContext() {
+      const cfg = await api("/wallet/chain-config");
+      const chainId = cfg.data?.chain_id || cfg.chain_id;
+      const lcdUrl = cfg.data?.lcd_url || cfg.lcd_url;
+      const snvrAddr = cfg.data?.snvr_address || cfg.snvr_address;
+      const snvrCodeHash = cfg.data?.snvr_code_hash || cfg.snvr_code_hash;
+      if (!chainId || !lcdUrl || !snvrAddr || !snvrCodeHash) throw new Error("Chain config incomplete. Check backend /wallet/chain-config.");
+      const keplr = window.keplr;
+      if (!keplr) throw new Error("Keplr extension not found.");
+      await keplr.enable(chainId);
+      const signer = keplr.getOfflineSigner(chainId);
+      const accounts = await signer.getAccounts();
+      const sender = accounts[0]?.address;
+      if (!sender) throw new Error("No account from Keplr.");
+      const enigmaUtils = keplr.getEnigmaUtils ? keplr.getEnigmaUtils(chainId) : null;
+      const lcdCandidates = getLcdCandidatesForMix(lcdUrl);
+      return { chainId, lcdUrl, lcdCandidates, snvrAddr, snvrCodeHash, sender, signer, enigmaUtils };
+    }
+    /** 고객 지갑에서 SNIP-20 transfer (운영지갑 미사용) */
+    async function keplrSnip20Transfer(recipientSecret, amountRaw) {
+      const ctx = await getSnvrTransferContext();
+      const SecretNetworkClient = await loadSecretJsClientCtor();
+      const urls = ctx.lcdCandidates.length ? ctx.lcdCandidates : [ctx.lcdUrl];
+      let lastErr = null;
+      const amt = String(Math.floor(Number(amountRaw)));
+      if (amt === "0" || Number(amt) <= 0) throw new Error("Invalid transfer amount.");
+      for (let i = 0; i < urls.length; i += 1) {
+        const url = urls[i];
+        try {
+          const client = new SecretNetworkClient({
+            url: url,
+            chainId: ctx.chainId,
+            wallet: ctx.signer,
+            walletAddress: ctx.sender,
+            encryptionUtils: ctx.enigmaUtils || undefined,
+          });
+          const tx = await client.tx.snip20.transfer(
+            {
+              sender: ctx.sender,
+              contract_address: ctx.snvrAddr,
+              code_hash: ctx.snvrCodeHash,
+              msg: { transfer: { recipient: String(recipientSecret).trim(), amount: amt } },
+            },
+            { gasLimit: 200000 }
+          );
+          return tx?.transactionHash || tx?.hash || "";
+        } catch (e) {
+          lastErr = e;
+          if (!isFetchLikeError(e)) throw e;
+        }
+      }
+      throw lastErr || new Error("SNVR_TRANSFER_FAILED");
+    }
+    /** GhostSwap AMM: 페어에서 native SCRT(uscrt) → SNVR, 수령인 to 에 SNVR 전달 */
+    async function keplrGhostswapAmmSwap(prepare) {
+      const ctx = await getSnvrTransferContext();
+      const SecretNetworkClient = await loadSecretJsClientCtor();
+      const denom = prepare.native_denom || "uscrt";
+      const offerAmt = String(Math.floor(Number(prepare.offer_uscrt_amount)));
+      if (offerAmt === "0" || Number(offerAmt) <= 0) throw new Error("Invalid SCRT offer amount.");
+      const urls = ctx.lcdCandidates.length ? ctx.lcdCandidates : [ctx.lcdUrl];
+      let lastErr = null;
+      for (let i = 0; i < urls.length; i += 1) {
+        const url = urls[i];
+        try {
+          const client = new SecretNetworkClient({
+            url: url,
+            chainId: ctx.chainId,
+            wallet: ctx.signer,
+            walletAddress: ctx.sender,
+            encryptionUtils: ctx.enigmaUtils || undefined,
+          });
+          const tx = await client.tx.compute.executeContract(
+            {
+              sender: ctx.sender,
+              contract_address: prepare.pair_address,
+              code_hash: prepare.pair_code_hash,
+              msg: {
+                swap: {
+                  offer_asset: { info: { native_token: { denom: denom } }, amount: offerAmt },
+                  expected_return: prepare.min_snvr_return || null,
+                  belief_price: null,
+                  max_spread: null,
+                  to: prepare.recipient_secret,
+                },
+              },
+              sent_funds: [{ denom: denom, amount: offerAmt }],
+            },
+            { gasLimit: 600000 }
+          );
+          return tx?.transactionHash || tx?.hash || "";
+        } catch (e) {
+          lastErr = e;
+          if (!isFetchLikeError(e)) throw e;
+        }
+      }
+      throw lastErr || new Error("GHOSTSWAP_AMM_FAILED");
     }
     async function executeContractWithLcdFallback(ctx, execMsg, gasLimit) {
       const urls = Array.isArray(ctx.lcdCandidates) && ctx.lcdCandidates.length ? ctx.lcdCandidates : [ctx.lcdUrl];
