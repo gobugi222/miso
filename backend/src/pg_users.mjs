@@ -1,11 +1,9 @@
 /**
  * Optional PostgreSQL persistence for the in-memory `users` Map only.
  * Enabled when DATABASE_URL is set. Chat / walletTxs stay in db.json.
+ *
+ * `pg`는 static import 금지: 모듈 로드 시점 크래시 방지. DATABASE_URL 있을 때만 dynamic import.
  */
-import pg from "pg";
-
-const { Pool } = pg;
-
 function clampPgTimeout(raw, min, max, fallback) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < min) return fallback;
@@ -22,6 +20,7 @@ export function isPgUsersEnabled() {
 
 export async function initPgUsers() {
   if (!isPgUsersEnabled()) return;
+  const { Pool } = await import("pg");
   const url = String(process.env.DATABASE_URL).trim();
   const connectMs = clampPgTimeout(process.env.PG_CONNECTION_TIMEOUT_MS, 8000, 60000, 8000);
   pool = new Pool({
