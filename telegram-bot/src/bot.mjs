@@ -313,7 +313,8 @@ const HELP_MSG = {
     "※ /send 는 봇·내부 잔액·받기코드로 가능하지만, /swap·/route 는 온체인이므로 수령인의 secret 주소가 등록돼 있어야 합니다.\n\n" +
     "🏊 릴레이 풀 vs 텔레그램 /route (헷갈리지 않기)\n" +
     "• 텔레그램 `/route 금액 수령인` = 백엔드 **직송**(온체인 1% 수수료). **풀을 거치지 않음**.\n" +
-    "• **풀**에 입금·티켓 쌓기·시간·금액 보고 골라 출금 = **`/pool web`** 또는 **스너버메신저**에서 Keplr로 진행.\n" +
+    "• **풀** 입금: **`/pool 100`** 또는 **`/pool 100 945424492`** → 메신저 링크 열고 **이미 연결한 지갑**으로 서명.\n" +
+    "• 풀 화면만: **`/pool web`**. 티켓·출금은 `/pool status`·`/pool 출금` (릴레이 API 있을 때).\n" +
     "• `/pool status` — 릴레이 API가 붙어 있으면 티켓 요약. `/pool 목록`·`/pool 출금` — API 경로가 있을 때.\n\n" +
     "💬 채팅\n" +
     "/myid — 내 채팅 ID (스너버메신저 새 채팅용)\n" +
@@ -451,6 +452,24 @@ bot.command("swap", async (ctx) => {
       from_platform_user_id: getUserId(ctx),
     }, SWAP_MIX_FETCH_TIMEOUT_MS);
     if (result === null) return ctx.reply(m.noConnect);
+    if (result.ok && result.data?.requires_keplr) {
+      const q = new URLSearchParams({
+        view: "swap",
+        platform_user_id: String(getUserId(ctx)),
+        to: String(recipient).trim(),
+        amount: String(numAmount),
+      });
+      const dl = await callBackendGet(`/wallet/messenger-deeplink?${q.toString()}`);
+      const openUrl = dl?.data?.url || result.data.messenger_url || "";
+      const lang = getLang(ctx);
+      const hint =
+        lang === "ja"
+          ? `🔗 GhostSwap(AMM): Keplrで **SCRT→相手のSNVR** を署名（プール経由・0.3%は受取SNVRから）。\n${openUrl}`
+          : lang === "ko"
+          ? `🔗 고스트스왑(AMM): 메신저에서 Keplr로 **SCRT → 상대 SNVR** 스왑을 서명하세요 (페어 유동성·수수료 0.3%는 수령 SNVR 기준).\n${openUrl}`
+          : `🔗 GhostSwap (AMM): sign **SCRT → recipient SNVR** in Messenger via Keplr (pool swap; 0.3% off SNVR received).\n${openUrl}`;
+      return ctx.reply(hint);
+    }
     if (result.ok && result.data?.ok) {
       const toReceive = result.data.to_receive;
       const msg = toReceive != null ? m.success(toReceive) : m.successTx(result.data.txHash || "-");
@@ -514,6 +533,17 @@ bot.command("mix", async (ctx) => {
       from_platform_user_id: getUserId(ctx),
     }, SWAP_MIX_FETCH_TIMEOUT_MS);
     if (result === null) return ctx.reply(m.noConnect);
+    if (result.ok && result.data?.requires_keplr) {
+      const openUrl = result.data.messenger_url || "";
+      const lang = getLang(ctx);
+      const hint =
+        lang === "ja"
+          ? `🔗 ルーティングはMessengerでKeplr入金・クレームを行ってください。\n${openUrl}`
+          : lang === "ko"
+          ? `🔗 프라이버시 라우팅은 스너버 메신저에서 Keplr로 믹서 입금·클레임을 진행해 주세요.\n${openUrl}`
+          : `🔗 Complete privacy routing in SNVR Messenger (Keplr deposit & claim).\n${openUrl}`;
+      return ctx.reply(hint);
+    }
     if (result.ok && result.data?.ok) {
       const toReceive = result.data.to_receive;
       const msg = toReceive != null ? m.success(toReceive) : m.successTx(result.data.txHash || "-");
@@ -545,6 +575,17 @@ bot.command("route", async (ctx) => {
       from_platform_user_id: getUserId(ctx),
     }, SWAP_MIX_FETCH_TIMEOUT_MS);
     if (result === null) return ctx.reply(m.noConnect);
+    if (result.ok && result.data?.requires_keplr) {
+      const openUrl = result.data.messenger_url || "";
+      const lang = getLang(ctx);
+      const hint =
+        lang === "ja"
+          ? `🔗 ルーティングはMessengerでKeplr入金・クレームを行ってください。\n${openUrl}`
+          : lang === "ko"
+          ? `🔗 프라이버시 라우팅은 스너버 메신저에서 Keplr로 믹서 입금·클레임을 진행해 주세요.\n${openUrl}`
+          : `🔗 Complete privacy routing in SNVR Messenger (Keplr deposit & claim).\n${openUrl}`;
+      return ctx.reply(hint);
+    }
     if (result.ok && result.data?.ok) {
       const toReceive = result.data.to_receive;
       const msg = toReceive != null ? m.success(toReceive) : m.successTx(result.data.txHash || "-");
@@ -659,6 +700,8 @@ const POOL_MSG = {
     noConnect: "백엔드에 연결할 수 없어요.",
     noMessenger: "백엔드에 MESSENGER_URL을 설정해 주세요 (Railway).",
     web: (u) => "🔗 릴레이 풀(메신저)\n" + u + "\n\n브라우저에서 Keplr로 입금·출금(클레임)",
+    webDepositHint: (a, to, u) =>
+      `🔗 풀 입금 안내 (${a} SNVR${to ? ` · 상대: ${to}` : ""})\n${u}\n\n위 링크를 **스너버메신저(모바일 웹)** 에서 열면, 이미 연결한 지갑·뷰키로 확인·서명하면 됩니다. 텔레그램 봇만으로는 체인 서명이 불가능해요.`,
     statusWebOnly: (u) => "📋 티켓 API 미연동 — 웹에서 확인:\n" + u,
     statusFail: (e) => "오류: " + e,
     listFail: (e) => "목록 조회 실패: " + e,
@@ -667,7 +710,8 @@ const POOL_MSG = {
     help:
       "🏊 릴레이 풀 (/pool)\n" +
       "※ 텔레그램 `/route` = 백엔드 **직송**(풀 아님). 풀은 메신저·Keplr.\n\n" +
-      "/pool web | /pool 입금 — 풀 화면 링크\n" +
+      "/pool 금액 [텔레그램ID|@유저|secret1…] — 입금용 링크(금액·상대 힌트, 메신저에서 서명)\n" +
+      "/pool web | /pool 입금 — 풀 화면만 열기\n" +
       "/pool status — 티켓 요약(릴레이 API 연동 시)\n" +
       "/pool 목록 — 티켓 목록 (MESSENGER_RELAY_TICKETS_PATH)\n" +
       "/pool 출금 티켓ID — 클레임 힌트·URL\n" +
@@ -678,6 +722,8 @@ const POOL_MSG = {
     noConnect: "接続できません",
     noMessenger: "MESSENGER_URL をバックエンドに設定",
     web: (u) => "🔗 リレープール\n" + u + "\n\nKeplrで入出金",
+    webDepositHint: (a, to, u) =>
+      `🔗 プール入金 (${a} SNVR${to ? ` → ${to}` : ""})\n${u}\n\nMessengerで開いて署名。`,
     statusWebOnly: (u) => "📋 API未連携:\n" + u,
     statusFail: (e) => "エラー: " + e,
     listFail: (e) => "一覧失敗: " + e,
@@ -686,7 +732,7 @@ const POOL_MSG = {
     help:
       "🏊 プール (/pool)\n" +
       "※ Telegram `/route` = **直送** (プールではない)\n\n" +
-      "/pool web | /pool deposit\n" +
+      "/pool 金額 [受取ヒント] | /pool web\n" +
       "/pool status | /pool list | /pool claim ID\n" +
       "/pool help",
   },
@@ -695,6 +741,8 @@ const POOL_MSG = {
     noConnect: "Cannot connect to backend",
     noMessenger: "Set MESSENGER_URL on backend",
     web: (u) => "🔗 Relay pool (messenger)\n" + u + "\n\nUse Keplr in browser",
+    webDepositHint: (a, to, u) =>
+      `🔗 Pool deposit (${a} SNVR${to ? ` → ${to}` : ""})\n${u}\n\nOpen in SNVR Messenger and sign with your linked wallet.`,
     statusWebOnly: (u) => "📋 No relay API — open:\n" + u,
     statusFail: (e) => "Error: " + e,
     listFail: (e) => "List failed: " + e,
@@ -703,7 +751,7 @@ const POOL_MSG = {
     help:
       "🏊 Relay pool (/pool)\n" +
       "※ Telegram `/route` = **direct** on-chain send (not the pool).\n\n" +
-      "/pool web | /pool deposit — open pool UI\n" +
+      "/pool amount [recipient-hint] | /pool web\n" +
       "/pool status — summary if relay API set\n" +
       "/pool list — tickets (relay tickets path)\n" +
       "/pool claim TICKET_ID — claim hint / URL\n" +
@@ -716,8 +764,37 @@ bot.command("pool", async (ctx) => {
     const m = POOL_MSG[lang] || POOL_MSG.en;
     if (!BACKEND_URL) return ctx.reply(m.noBackend);
     const parts = (ctx.message?.text || "").trim().split(/\s+/).slice(1);
-    const sub = normalizePoolSubcommand(parts[0]);
     const uid = getUserId(ctx);
+    const firstTok = parts[0];
+    const maybePoolAmt = parseFloat(firstTok);
+    const looksLikeAmount =
+      parts.length >= 1 &&
+      Number.isFinite(maybePoolAmt) &&
+      maybePoolAmt > 0 &&
+      !/^0x/i.test(String(firstTok)) &&
+      !String(firstTok).toLowerCase().startsWith("secret1");
+    if (looksLikeAmount) {
+      const poolTo = parts[1] ? String(parts[1]).trim() : "";
+      let path =
+        "/routing/telegram-deeplink?platform_user_id=" +
+        encodeURIComponent(uid) +
+        "&pool_amount=" +
+        encodeURIComponent(maybePoolAmt);
+      if (poolTo) path += "&pool_to=" + encodeURIComponent(poolTo.replace(/^@/, ""));
+      const res = await callBackendGet(path, BACKEND_FETCH_TIMEOUT_MS);
+      if (res === null) return ctx.reply(m.noConnect);
+      if (!res.ok || !res.data?.ok) {
+        const err = res.data?.error || res.data?.message || "err";
+        if (String(err).includes("messenger_url")) return ctx.reply(m.noMessenger);
+        return ctx.reply(m.statusFail(err));
+      }
+      const msg =
+        typeof m.webDepositHint === "function"
+          ? m.webDepositHint(maybePoolAmt, poolTo, res.data.url)
+          : m.web(res.data.url);
+      return ctx.reply(msg);
+    }
+    const sub = normalizePoolSubcommand(parts[0]);
     const ticketArg = parts[1];
     if (sub === "help" || sub === "") return ctx.reply(m.help);
     if (sub === "web") {
@@ -888,6 +965,24 @@ bot.command("send", async (ctx) => {
   else body.to_username = to;
   const res = await callBackend("/wallet/send", body);
   if (!res?.ok) return ctx.reply(res?.data?.error || m.sendFail);
+  if (res.data?.requires_keplr) {
+    const q = new URLSearchParams({
+      view: "send",
+      platform_user_id: String(userId),
+      to: String(to),
+      amount: String(amount),
+    });
+    const dl = await callBackendGet(`/wallet/messenger-deeplink?${q.toString()}`);
+    const openUrl = dl?.data?.url || res.data?.messenger_url || "";
+    const lang = getLang(ctx);
+    const lines =
+      lang === "ja"
+        ? `🔗 SNVRは**ご本人のKeplr**から送信されます（運営ウォレットは使いません）。\nMessengerで署名して完了してください:\n${openUrl}`
+        : lang === "ko"
+        ? `🔗 SNVR는 **본인 Keplr 지갑**에서만 전송됩니다 (운영 지갑 미사용).\n스너버 메신저에서 서명 후 완료하세요:\n${openUrl}`
+        : `🔗 SNVR is sent from **your Keplr** only (not the operator wallet).\nOpen SNVR Messenger to sign and complete:\n${openUrl}`;
+    return ctx.reply(lines);
+  }
   const recipientId = res.data?.recipient_telegram_id;
   if (recipientId) {
     const senderName = ctx.from?.username ? "@" + ctx.from.username : ctx.from?.first_name || "Someone";
