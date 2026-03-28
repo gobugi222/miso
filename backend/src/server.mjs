@@ -151,16 +151,21 @@ app.get("/wallet/chain-config", (req, res) => {
 });
 
 
-/** SNVR Messenger */
-function buildMessengerPrivacyRoutingUrl(platformUserId) {
+/** SNVR Messenger — extra 쿼리는 메신저 프론트가 읽으면 풀 금액·상대 프리필 가능(미구현이면 무시됨). */
+function buildMessengerPrivacyRoutingUrl(platformUserId, extra = {}) {
   const base = String(process.env.MESSENGER_URL || "").trim().replace(/\/$/, "");
   if (!base) return "";
   const routePath = String(process.env.MESSENGER_PRIVACY_ROUTING_PATH || "/wallet").trim();
   const pfx = routePath.startsWith("/") ? routePath : "/" + routePath;
   let url = base + pfx;
-  if (platformUserId) {
-    const q = new URLSearchParams();
-    q.set("telegram_user_id", String(platformUserId));
+  const q = new URLSearchParams();
+  if (platformUserId) q.set("telegram_user_id", String(platformUserId));
+  for (const [k, v] of Object.entries(extra)) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s !== "") q.set(k, s);
+  }
+  if ([...q.keys()].length > 0) {
     url += (url.includes("?") ? "&" : "?") + q.toString();
   }
   return url;
@@ -171,7 +176,17 @@ app.get("/routing/telegram-deeplink", (req, res) => {
   if (!platform_user_id) {
     return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
   }
-  const url = buildMessengerPrivacyRoutingUrl(platform_user_id);
+  const poolAmount = req.query.pool_amount ?? req.query.amount;
+  const poolTo = req.query.pool_to ?? req.query.recipient ?? "";
+  const extra = {};
+  if (poolAmount != null && String(poolAmount).trim() !== "" && Number.isFinite(Number(poolAmount)) && Number(poolAmount) > 0) {
+    extra.pool_amount = String(poolAmount).trim();
+    extra.pool_action = "deposit";
+  }
+  if (poolTo != null && String(poolTo).trim() !== "") {
+    extra.pool_to = String(poolTo).trim().replace(/^@/, "");
+  }
+  const url = buildMessengerPrivacyRoutingUrl(platform_user_id, extra);
   if (!url) return res.status(503).json({ ok: false, error: "messenger_url_not_configured" });
   return res.json({ ok: true, url });
 });
@@ -456,10 +471,32 @@ function ensureUser(platform, platformUserId, username) {
       viewing_key: null,
       permit: null,
       bot_balance_sync: false,
+      relay_outstanding: 0,
       locale: "en",
     });
   }
   return users.get(key);
+}
+
+/** 체인(permit/뷰키) 연동 사용자 */
+function isChainLinkedUser(u) {
+  return !!(u && u.secret_address && (u.viewing_key || u.permit));
+}
+
+function getRelayOutstanding(u) {
+  const r = Number(u?.relay_outstanding || 0);
+  return Number.isFinite(r) && r > 0 ? r : 0;
+}
+
+/**
+ * MNEMONIC 릴레이 송금은 보낸 사람 지갑에서 SNVR가 빠지지 않는다.
+ * 체인 잔액은 그대로인데 서비스가 대납했으므로, 누적 릴레이 출금만큼 "보낼 수 있는 잔액"을 줄인다.
+ */
+function spendableAfterRelay(u, chainOrMemoryHuman) {
+  const base = Number(chainOrMemoryHuman);
+  if (!Number.isFinite(base) || base < 0) return 0;
+  if (!isChainLinkedUser(u)) return base;
+  return Math.max(0, base - getRelayOutstanding(u));
 }
 
 function rememberChainBalance(u, humanBalance) {
@@ -504,8 +541,9 @@ function scheduleChainRefresh(userKey, fn) {
 function walletBalanceView(u) {
   const fbBal = getFallbackBalance(u);
   const hasCachedChain = Number.isFinite(Number(u.last_chain_balance)) && Number(u.last_chain_balance) >= 0 && Number(u.last_chain_at || 0) > 0;
-  const immediate = hasCachedChain ? Math.max(fbBal, Number(u.last_chain_balance)) : fbBal;
-  return { hasCachedChain, immediate, fbBal };
+  const immediateRaw = hasCachedChain ? Math.max(fbBal, Number(u.last_chain_balance)) : fbBal;
+  const immediate = spendableAfterRelay(u, immediateRaw);
+  return { hasCachedChain, immediate, immediateRaw, fbBal };
 }
 
 const CHAT_NOTIFY_MSG = {
@@ -580,7 +618,7 @@ app.post("/wallet/register", (req, res) => {
   if (username != null) u.username = username;
   if (locale && ["en", "ko", "ja"].includes(String(locale).toLowerCase())) u.locale = String(locale).toLowerCase();
   saveDb();
-  return res.json({ ok: true, user_id: platformKey(platform, platform_user_id), balance: u.balance });
+  return res.json({ ok: true, user_id: platformKey(platform, platform_user_id), balance: walletBalanceView(u).immediate });
 });
 
 app.get("/wallet/balance", async (req, res) => {
@@ -661,6 +699,11 @@ app.get("/wallet/balance", async (req, res) => {
     pending_chain,
     ...(getChainError ? { chain_error: getChainError } : {}),
   };
+  const ro = getRelayOutstanding(u);
+  if (isChainLinkedUser(u) && ro > 0) {
+    out.relay_outstanding = ro;
+    if (Number.isFinite(Number(u.last_chain_balance))) out.chain_balance = Number(u.last_chain_balance);
+  }
   if (debugPermit && u.secret_address && u.permit) {
     // Best-effort: when debugging, return a probe result so we can see *why* permit chain query fails.
     // Keep a shorter budget so it doesn't hang the endpoint.
@@ -1034,11 +1077,13 @@ app.post("/wallet/send", async (req, res) => {
     if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
     throw e;
   }
-  if (effective < numAmount) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "insufficient_balance") });
+  const spendable = spendableAfterRelay(fromU, effective);
+  if (spendable < numAmount) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "insufficient_balance") });
 
   const toSecretAddr = toU.secret_address ? String(toU.secret_address).trim() : "";
   let chainTxHash = null;
-  // P2P 송금은 운영 지갑(MNEMONIC)에서 수령인 secret 주소로 SNIP-20 transfer — 알림/내부 잔액은 성공 후에만 반영
+  let usedRelay = false;
+  // P2P 송금은 운영 지갑(MNEMONIC)에서 수령인 secret 주소로 SNIP-20 transfer — 보낸 사람 지갑 잔액은 체인상 안 줄어듦(relay_outstanding로 한도만 차감)
   if (USE_SECRET && process.env.MNEMONIC && toSecretAddr && !MOCK) {
     const amountRaw = String(Math.floor(numAmount * 1e9));
     const result = await sendSnvr(toSecretAddr, amountRaw);
@@ -1050,6 +1095,9 @@ app.post("/wallet/send", async (req, res) => {
       });
     }
     chainTxHash = result.txHash || null;
+    fromU.relay_outstanding = getRelayOutstanding(fromU) + numAmount;
+    rememberChainBalance(fromU, effective);
+    usedRelay = true;
   } else if (USE_SECRET && !process.env.MNEMONIC && !MOCK) {
     return res.status(503).json({
       ok: false,
@@ -1058,8 +1106,10 @@ app.post("/wallet/send", async (req, res) => {
     });
   }
 
-  fromU.balance = effective;
-  fromU.balance -= numAmount;
+  if (!usedRelay) {
+    fromU.balance = effective;
+    fromU.balance -= numAmount;
+  }
   toU.balance += numAmount;
   walletTxs.push({
     id: walletTxId++,
@@ -1095,7 +1145,16 @@ app.post("/wallet/send", async (req, res) => {
     created_at: new Date().toISOString(),
   };
   chatMessages.push(sysMsg);
-  const payload = { ok: true, from_balance: fromU.balance, to_balance: toU.balance, txHash: chainTxHash || undefined };
+  const payload = {
+    ok: true,
+    from_balance: spendableAfterRelay(fromU, effective),
+    to_balance: toU.balance,
+    txHash: chainTxHash || undefined,
+  };
+  if (usedRelay) {
+    payload.relay_mode = true;
+    payload.sender_chain_balance_unchanged = true;
+  }
   if (toPlatform === "telegram") {
     payload.recipient_telegram_id = toId;
     payload.recipient_locale = lang;
@@ -1115,7 +1174,10 @@ app.post("/wallet/link-secret", (req, res) => {
     return res.status(400).json({ ok: false, error: "permit or viewing_key required" });
   }
   const u = ensureUser(platform, platform_user_id);
-  u.secret_address = String(secret_address).trim();
+  const prevAddr = u.secret_address ? String(u.secret_address).trim() : "";
+  const nextAddr = String(secret_address).trim();
+  if (prevAddr && prevAddr !== nextAddr) u.relay_outstanding = 0;
+  u.secret_address = nextAddr;
   u.viewing_key = vk || null;
   u.permit = permit || null;
   u.bot_balance_sync = true;
@@ -1560,12 +1622,14 @@ app.post("/swap", async (req, res) => {
         if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
         throw e;
       }
-      if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_swap") });
-      if (fromU) fromU.balance = effective;
+      if (!fromU || spendableAfterRelay(fromU, effective) < numAmount) {
+        return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_swap") });
+      }
       const amountRaw = String(Math.floor(toReceive * 1e9));
       const result = await sendSnvr(toAddr, amountRaw);
       if (result.ok) {
-        if (fromU) fromU.balance -= numAmount;
+        fromU.relay_outstanding = getRelayOutstanding(fromU) + numAmount;
+        rememberChainBalance(fromU, effective);
         const toKey = resolveRecipientToUserKey(recipient, platform);
         if (toKey && toKey !== fromKey) {
           const [p, id] = toKey.split(":");
@@ -1582,7 +1646,7 @@ app.post("/swap", async (req, res) => {
           });
         }
         saveDb();
-        return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive });
+        return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive, relay_mode: true });
       }
       return res.status(400).json({ ok: false, error: result.error });
   }
@@ -1599,7 +1663,7 @@ app.post("/swap", async (req, res) => {
       if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
       throw e;
     }
-    if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_swap") });
+    if (spendableAfterRelay(fromU, effective) < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_swap") });
     fromU.balance = effective;
     fromU.balance -= numAmount;
     const toKey = resolveRecipientToUserKey(recipient, platform);
@@ -1662,12 +1726,14 @@ app.post("/mix", async (req, res) => {
         if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
         throw e;
       }
-      if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
-      if (fromU) fromU.balance = effective;
+      if (!fromU || spendableAfterRelay(fromU, effective) < numAmount) {
+        return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
+      }
       const amountRaw = String(Math.floor(toReceive * 1e9));
       const result = await sendSnvr(toAddr, amountRaw);
       if (result.ok) {
-        if (fromU) fromU.balance -= numAmount;
+        fromU.relay_outstanding = getRelayOutstanding(fromU) + numAmount;
+        rememberChainBalance(fromU, effective);
         const toKey = resolveRecipientToUserKey(recipient, platform);
         if (toKey && toKey !== fromKey) {
           const [p, id] = toKey.split(":");
@@ -1684,7 +1750,7 @@ app.post("/mix", async (req, res) => {
           });
         }
         saveDb();
-        return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive });
+        return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive, relay_mode: true });
       }
       return res.status(400).json({ ok: false, error: result.error });
   }
@@ -1701,7 +1767,7 @@ app.post("/mix", async (req, res) => {
       if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
       throw e;
     }
-    if (effective < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
+    if (spendableAfterRelay(fromU, effective) < numAmount) return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
     fromU.balance = effective;
     fromU.balance -= numAmount;
     const toKey = resolveRecipientToUserKey(recipient, platform);
