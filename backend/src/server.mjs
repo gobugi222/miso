@@ -1647,19 +1647,23 @@ app.post("/wallet/faucet", (req, res) => {
   return res.json({ ok: true, balance: u.balance, added: add });
 });
 
-async function startServer() {
-  loadDb();
-  if (isPgUsersEnabled()) {
-    try {
-      await initPgUsers();
-      const h = await hydrateUsersFromPostgres(users);
-      console.log("[pg_users]", h.source, h.count);
-    } catch (e) {
-      console.error("[pg_users] startup failed — continuing with file-only users:", e?.message || e);
-    }
+/** Postgres는 listen 이후에 붙인다. 연결 지연/교착 시에도 PORT에 바인딩되어 Railway 502(앱 무응답)를 피한다. */
+async function bootstrapPgUsersFromDb() {
+  if (!isPgUsersEnabled()) return;
+  try {
+    await initPgUsers();
+    const h = await hydrateUsersFromPostgres(users);
+    console.log("[pg_users]", h.source, h.count);
+  } catch (e) {
+    console.error("[pg_users] startup failed — continuing with file-only users:", e?.message || e);
   }
-  app.listen(PORT, () => {
-    console.log(`Snvr backend on http://localhost:${PORT} (mock=${MOCK}, secret=${USE_SECRET})`);
+}
+
+function startServer() {
+  loadDb();
+  const bindHost = String(process.env.BIND_HOST || "0.0.0.0").trim() || "0.0.0.0";
+  app.listen(PORT, bindHost, () => {
+    console.log(`Snvr backend on http://${bindHost}:${PORT} (mock=${MOCK}, secret=${USE_SECRET})`);
     try {
       const c = loadConfig();
       if (process.env.SECRET_NETWORK === "1") {
@@ -1675,7 +1679,10 @@ async function startServer() {
     }
     if (TELEGRAM_BOT_TOKEN) console.log("  [송금알림] 텔레그램 봇 토큰 로드됨 → 입금 시 텔레그램 알림 전송 가능");
     else console.warn("  [송금알림] TELEGRAM_BOT_TOKEN 없음 → backend/.env 또는 telegram-bot/.env의 BOT_TOKEN 필요");
-    if (isPgUsersEnabled()) console.log("  [pg_users] DATABASE_URL active → users table sync");
+    if (isPgUsersEnabled()) {
+      console.log("  [pg_users] DATABASE_URL set → users sync after bind (non-blocking)");
+      void bootstrapPgUsersFromDb();
+    }
   });
 }
 startServer();

@@ -6,6 +6,12 @@ import pg from "pg";
 
 const { Pool } = pg;
 
+function clampPgTimeout(raw, min, max, fallback) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min) return fallback;
+  return Math.min(max, Math.trunc(n));
+}
+
 let pool = null;
 let syncTimer = null;
 const DEBOUNCE_MS = 2000;
@@ -17,9 +23,11 @@ export function isPgUsersEnabled() {
 export async function initPgUsers() {
   if (!isPgUsersEnabled()) return;
   const url = String(process.env.DATABASE_URL).trim();
+  const connectMs = clampPgTimeout(process.env.PG_CONNECTION_TIMEOUT_MS, 8000, 60000, 8000);
   pool = new Pool({
     connectionString: url,
     max: Math.min(10, Math.max(2, Number(process.env.PG_POOL_MAX) || 5)),
+    connectionTimeoutMillis: connectMs,
   });
   await pool.query(`
     CREATE TABLE IF NOT EXISTS snv_users (
