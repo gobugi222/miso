@@ -2138,7 +2138,13 @@ Recipient: Telegram @username, secret1…, or receive code — bot help uses ful
       if (!r.ok && hasWalletAuthCreds(getCreds()) && /wallet|지갑|Keplr|linked|연결|sender|not connected/i.test(String(failMsg))) {
         failMsg += " — If you just connected, open ⚙️ Settings and tap Connect Keplr once more.";
       }
-      el.textContent = r.ok ? `✅ Sent. Balance: ${r.data.from_balance}` : failMsg;
+      if (r.ok) {
+        var sentMsg = r.data.relay_mode
+          ? "✅ 전송됨(서버 릴레이). 사용 가능 잔액: " + r.data.from_balance + " — Keplr에 보이는 SNVR는 그대로일 수 있어요(체인 출금은 운영 지갑)."
+          : "✅ Sent. Balance: " + r.data.from_balance;
+        if (r.data.txHash) sentMsg += " · tx: " + r.data.txHash;
+        el.textContent = sentMsg;
+      } else el.textContent = failMsg;
       el.className = r.ok ? "success" : "error";
       if (r.ok) { refreshBalance(); refreshProfileSidebar(); loadHistory(); }
       if (!r.ok && r.data?.error === "viewing_key_invalid") el.textContent += " Tap Settings → Reconnect Keplr.";
