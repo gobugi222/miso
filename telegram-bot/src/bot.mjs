@@ -22,6 +22,8 @@ const AD_STATE_PATH = join(process.cwd(), "data", "ad-state.json");
 const BACKEND_FETCH_TIMEOUT_MS = Number(process.env.BACKEND_FETCH_TIMEOUT_MS) || 90000;
 /** /wallet/balance 만 체인 LCD 재시도로 오래 걸릴 수 있음 — 봇이 60초에 끊으면 사용자만 타임아웃 당함 */
 const BALANCE_FETCH_TIMEOUT_MS = Number(process.env.BALANCE_FETCH_TIMEOUT_MS) || 180000;
+/** /swap·/route(/mix): 체인 잔액 확인+전송이 길어질 수 있음 — 기본 90초보다 길게 */
+const SWAP_MIX_FETCH_TIMEOUT_MS = Number(process.env.SWAP_MIX_FETCH_TIMEOUT_MS) || 180000;
 /** Telegraf 핸들러 한도 — balance 대기 시간보다 커야 함 */
 const TELEGRAM_HANDLER_TIMEOUT_MS = Number(process.env.TELEGRAM_HANDLER_TIMEOUT_MS) || 240000;
 
@@ -75,15 +77,16 @@ function backendFetchError(e) {
   return { ok: false, data: { error: "Cannot connect to backend. Check if it's running. (ECONNREFUSED)" } };
 }
 
-async function callBackend(path, body) {
+async function callBackend(path, body, timeoutMs) {
   if (!BACKEND_URL) return null;
   const url = `${BACKEND_URL.replace(/\/$/, "")}${path}`;
+  const ms = timeoutMs != null && Number(timeoutMs) > 0 ? Number(timeoutMs) : BACKEND_FETCH_TIMEOUT_MS;
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(BACKEND_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ms),
     });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, data };
@@ -419,7 +422,7 @@ bot.command("swap", async (ctx) => {
       recipient: recipient.trim(),
       platform: "telegram",
       from_platform_user_id: getUserId(ctx),
-    });
+    }, SWAP_MIX_FETCH_TIMEOUT_MS);
     if (result === null) return ctx.reply(m.noConnect);
     if (result.ok && result.data?.ok) {
       const toReceive = result.data.to_receive;
@@ -436,7 +439,7 @@ bot.command("swap", async (ctx) => {
 const MIX_MSG = {
   ko: {
     noBackend: "[Privacy Routing] BACKEND_URL을 설정하고 백엔드를 실행해 주세요.",
-    usage: "사용법: /route 금액 수령인\n예: /route 50 @친구\n예: /route 50 secret1...주소\n(수수료 1%, 0.5% 소각+0.5% 운영)",
+    usage: "사용법: /route 금액 수령인\n예: /route 50 @친구\n예: /route 50 secret1...주소\n예: /route 50 8250638513 (텔레그램 숫자 ID, 상대가 /start·/link_secret 완료)\n(수수료 1%, 0.5% 소각+0.5% 운영)",
     invalidAmount: "금액은 양수로 입력해 주세요.",
     noConnect: "백엔드에 연결할 수 없어요. 백엔드를 실행했는지 확인해 주세요.",
     success: (r) => `✅ Privacy routing 완료. 수수료 1% 차감 후 수령인 입금: ${r} SNVR`,
@@ -446,7 +449,7 @@ const MIX_MSG = {
   },
   ja: {
     noBackend: "[プライバシー・ルーティング] BACKEND_URLを設定し、バックエンドを起動してください。",
-    usage: "使い方: /route 金額 受取人\n例: /route 50 @友達\n例: /route 50 secret1...アドレス\n(手数料1%, 0.5%焼却+0.5%運営)",
+    usage: "使い方: /route 金額 受取人\n例: /route 50 @友達\n例: /route 50 secret1...アドレス\n例: /route 50 8250638513 (Telegram数値ID。相手は /start・/link_secret 済み)\n(手数料1%, 0.5%焼却+0.5%運営)",
     invalidAmount: "金額は正の数で入力してください。",
     noConnect: "バックエンドに接続できません。起動しているか確認してください。",
     success: (r) => `✅ プライバシー・ルーティング完了。手数料1%控除後、受取人入金: ${r} SNVR`,
@@ -456,7 +459,7 @@ const MIX_MSG = {
   },
   en: {
     noBackend: "[Privacy Routing] Set BACKEND_URL and run the backend.",
-    usage: "Usage: /route amount recipient\nEx: /route 50 @friend\nEx: /route 50 secret1...address\n(1% fee, 0.5% burn + 0.5% ops)",
+    usage: "Usage: /route amount recipient\nEx: /route 50 @friend\nEx: /route 50 secret1...address\nEx: /route 50 8250638513 (Telegram numeric ID; recipient must /start and /link_secret)\n(1% fee, 0.5% burn + 0.5% ops)",
     invalidAmount: "Please enter a positive amount.",
     noConnect: "Cannot connect to backend. Check if it's running.",
     success: (r) => `✅ Privacy routing done. After 1% fee, recipient receives: ${r} SNVR`,
@@ -482,7 +485,7 @@ bot.command("mix", async (ctx) => {
       recipient: recipient.trim(),
       platform: "telegram",
       from_platform_user_id: getUserId(ctx),
-    });
+    }, SWAP_MIX_FETCH_TIMEOUT_MS);
     if (result === null) return ctx.reply(m.noConnect);
     if (result.ok && result.data?.ok) {
       const toReceive = result.data.to_receive;
@@ -513,7 +516,7 @@ bot.command("route", async (ctx) => {
       recipient: recipient.trim(),
       platform: "telegram",
       from_platform_user_id: getUserId(ctx),
-    });
+    }, SWAP_MIX_FETCH_TIMEOUT_MS);
     if (result === null) return ctx.reply(m.noConnect);
     if (result.ok && result.data?.ok) {
       const toReceive = result.data.to_receive;
@@ -849,18 +852,6 @@ bot.command("postad", async (ctx) => {
 });
 
 // AI 비서: OWNER_TELEGRAM_ID만 사용 가능. .env에 OWNER_TELEGRAM_ID=내텔레그램숫자ID 설정.
-/** Handler errors default to rethrow + exitCode=1 — keep polling alive and log for Railway. */
-bot.catch((err, ctx) => {
-  console.error("[snvr-bot handler error]", err?.message || err, "update=", ctx?.update?.update_id);
-  if (err?.stack) console.error(err.stack.slice(0, 500));
-  const chatId = ctx?.chat?.id;
-  if (chatId) {
-    const msg =
-      "일시적 오류가 났어요. 잠시 후 다시 시도해 주세요.\n(Temporary error — please try again.)";
-    ctx.reply(msg).catch(() => {});
-  }
-});
-
 bot.command("ask", async (ctx) => {
   const ownerId = String(OWNER_TELEGRAM_ID).trim();
   if (!ownerId || String(ctx.from?.id) !== ownerId) {
@@ -898,6 +889,18 @@ bot.command("ask", async (ctx) => {
       ? "응답이 너무 오래 걸렸어요. Ollama가 켜져 있는지, 모델이 받아졌는지 확인해 주세요."
       : "AI 비서 연결에 실패했어요. OLLAMA_URL이 맞는지, Ollama가 실행 중인지 확인해 주세요.";
     return ctx.reply(msg);
+  }
+});
+
+/** After all commands: log + reply; do not crash the polling loop on one bad update. */
+bot.catch((err, ctx) => {
+  console.error("[snvr-bot handler error]", err?.message || err, "update=", ctx?.update?.update_id);
+  if (err?.stack) console.error(err.stack.slice(0, 500));
+  const chatId = ctx?.chat?.id;
+  if (chatId) {
+    const msg =
+      "일시적 오류가 났어요. 잠시 후 다시 시도해 주세요.\n(Temporary error — please try again.)";
+    ctx.reply(msg).catch(() => {});
   }
 });
 
