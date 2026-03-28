@@ -42,7 +42,7 @@ function getLcdCandidates() {
   const chain = String(config.chain_id || "");
   const isMainnet = chain === "secret-4" || chain.includes("secret-4");
   const baked = isMainnet
-    ? ["https://lcd.secret.express", "https://rest.lavenderfive.com/secretnetwork"]
+    ? ["https://rest.lavenderfive.com/secretnetwork", "https://lcd.secret.express"]
     : [];
   const out = [];
   const seen = new Set();
@@ -91,10 +91,58 @@ function loadConfig() {
     mixer_code_hash: full.mixer_code_hash,
     router_address: ghost.ghostswap_router_address,
     router_code_hash: ghost.ghostswap_router_code_hash,
+    ghostswap_pair_address: ghost.scrt_snvr_pair_address || process.env.GHOSTSWAP_PAIR_ADDRESS || null,
+    ghostswap_pair_code_hash: ghost.ghostswap_pair_code_hash || process.env.GHOSTSWAP_PAIR_CODE_HASH || null,
+    native_swap_denom: process.env.NATIVE_SWAP_DENOM || "uscrt",
     chain_id: full.chain_id || process.env.CHAIN_ID || "secretdev-1",
     lcd_url: process.env.LCD_URL || "http://localhost:1317",
   };
   return config;
+}
+
+/** SCRT↔SNVR 페어가 설정돼 있는지 (deploy-ghostswap.json 또는 env) */
+export function isGhostswapPairConfigured() {
+  const c = loadConfig();
+  return !!(c.ghostswap_pair_address && c.ghostswap_pair_code_hash && c.snvr_token && c.snvr_code_hash);
+}
+
+/**
+ * GhostSwap AMM: 수령할 SNVR(최소단위) 기준 역시뮬 → 필요한 native(uscrt) 입력량
+ */
+export async function ghostswapReverseSimulationSnvrOut(snvrOutRaw) {
+  const c = loadConfig();
+  if (!isGhostswapPairConfigured()) {
+    return { ok: false, error_code: "PAIR_NOT_CONFIGURED", error: "GhostSwap pair or SNVR not in config" };
+  }
+  const raw = String(Math.floor(Number(snvrOutRaw)));
+  if (raw === "0" || Number(raw) <= 0) {
+    return { ok: false, error_code: "INVALID_AMOUNT", error: "snvrOutRaw must be positive" };
+  }
+  const ask_asset = {
+    info: {
+      token: {
+        contract_addr: c.snvr_token,
+        token_code_hash: c.snvr_code_hash,
+        viewing_key: "",
+      },
+    },
+    amount: raw,
+  };
+  const client = getQueryClient();
+  try {
+    const r = await client.query.compute.queryContract({
+      contract_address: c.ghostswap_pair_address,
+      code_hash: c.ghostswap_pair_code_hash,
+      query: { reverse_simulation: { ask_asset } },
+    });
+    const offer = r?.offer_amount != null ? String(r.offer_amount).replace(/\..*$/, "") : null;
+    if (!offer || offer === "0") {
+      return { ok: false, error_code: "SIM_FAIL", error: "reverse_simulation returned no offer_amount", raw: r };
+    }
+    return { ok: true, offer_amount: offer, spread_amount: r.spread_amount, commission_amount: r.commission_amount, simulation: r };
+  } catch (e) {
+    return { ok: false, error_code: "LCD_QUERY", error: String(e?.message || e) };
+  }
 }
 
 export function isSecretEnabled() {
@@ -450,7 +498,8 @@ export function getRecipientSecretResolution(recipient, users) {
   if (!toKey) return { ok: false, reason: "unresolved" };
   const u = users.get(toKey);
   if (!u) {
-    if (/^\d{5,}$/.test(r)) return { ok: false, reason: "telegram_unknown" };
+    const idOnly = r.replace(/^@/, "");
+    if (/^\d{5,}$/.test(idOnly)) return { ok: false, reason: "telegram_unknown" };
     return { ok: false, reason: "unresolved" };
   }
   if (!u.secret_address) return { ok: false, reason: "no_secret" };
@@ -460,7 +509,10 @@ export function getRecipientSecretResolution(recipient, users) {
 function resolveRecipientToUserKey(recipient, users) {
   const r = String(recipient || "").trim();
   if (r.startsWith("@")) {
-    const uname = r.slice(1).toLowerCase();
+    const rest = r.slice(1);
+    // @뒤가 숫자만이면 텔레그램 user id (공개 @username 이 아님)
+    if (/^\d{5,}$/.test(rest)) return "telegram:" + rest;
+    const uname = rest.toLowerCase();
     for (const [k, v] of users) {
       if (v.username && v.username.toLowerCase() === uname) return k;
     }

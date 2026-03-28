@@ -1,6 +1,7 @@
 /**
  * Snvr 백엔드 API - 스왑·믹싱 + 지갑(송금·받기) + 스너버메신저 연동.
  * Secret Network 연동: /wallet/link-secret, /balance(체인), /swap, /mix
+ * SNVR 전송·스왑: 운영지갑 릴레이 없음 — 고객 Keplr 서명(/wallet/send·/swap prepare + ack).
  * DB: data/db.json (재시작 시 잔액·채팅 유지)
  */
 import "dotenv/config";
@@ -12,9 +13,10 @@ import {
   getSnvrBalance,
   getSnvrBalanceWithPermit,
   getSnvrBalanceWithPermitProbe,
-  sendSnvr,
   resolveRecipientToSecretAddress,
   getRecipientSecretResolution,
+  ghostswapReverseSimulationSnvrOut,
+  isGhostswapPairConfigured,
   isSecretEnabled,
   loadConfig,
 } from "./secret.mjs";
@@ -134,6 +136,9 @@ app.get("/wallet/chain-config", (req, res) => {
       snvr_code_hash: c.snvr_code_hash || null,
       mixer_address: c.mixer_address || null,
       mixer_code_hash: c.mixer_code_hash || null,
+      ghostswap_pair_address: c.ghostswap_pair_address || null,
+      ghostswap_pair_code_hash: c.ghostswap_pair_code_hash || null,
+      native_swap_denom: c.native_swap_denom || "uscrt",
       snvr_decimals: 9,
     });
   } catch (e) {
@@ -145,9 +150,27 @@ app.get("/wallet/chain-config", (req, res) => {
       snvr_code_hash: null,
       mixer_address: null,
       mixer_code_hash: null,
+      ghostswap_pair_address: null,
+      ghostswap_pair_code_hash: null,
+      native_swap_denom: "uscrt",
       snvr_decimals: 9,
     });
   }
+});
+
+/** 텔레그램 봇용: 메신저 딥링크 (Keplr 송금·스왑·라우팅) */
+app.get("/wallet/messenger-deeplink", (req, res) => {
+  const platform_user_id = req.query.platform_user_id;
+  const view = String(req.query.view || "send").trim();
+  if (!platform_user_id) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  }
+  const url = buildMessengerAppDeeplink(platform_user_id, view, {
+    to: req.query.to,
+    amount: req.query.amount,
+  });
+  if (!url) return res.status(503).json({ ok: false, error: "messenger_url_not_configured" });
+  return res.json({ ok: true, url });
 });
 
 
@@ -169,6 +192,21 @@ function buildMessengerPrivacyRoutingUrl(platformUserId, extra = {}) {
     url += (url.includes("?") ? "&" : "?") + q.toString();
   }
   return url;
+}
+
+/** 텔레그램 유저용 메신저 딥링크 (view, to, amount, platform_user_id) */
+function buildMessengerAppDeeplink(platformUserId, view, extra = {}) {
+  const base = String(process.env.MESSENGER_URL || "").trim().replace(/\/$/, "");
+  if (!base) return "";
+  const q = new URLSearchParams();
+  q.set("view", String(view || "send").trim());
+  if (platformUserId) {
+    q.set("platform", "telegram");
+    q.set("platform_user_id", String(platformUserId));
+  }
+  if (extra.to != null && String(extra.to).trim() !== "") q.set("to", String(extra.to).trim());
+  if (extra.amount != null && String(extra.amount).trim() !== "") q.set("amount", String(extra.amount).trim());
+  return `${base}/?${q.toString()}`;
 }
 
 app.get("/routing/telegram-deeplink", (req, res) => {
@@ -576,6 +614,12 @@ const ERR = {
   insufficient_balance: { ko: "잔액이 부족해요.", ja: "残高が不足しています。", en: "Insufficient balance." },
   insufficient_balance_swap: { ko: "잔액이 부족해요. (수수료 0.3%는 보낸 금액에서 차감돼요)", ja: "残高不足です。(手数料0.3%は送金額から差し引かれます)", en: "Insufficient balance. (0.3% fee is deducted from amount)" },
   insufficient_balance_mix: { ko: "잔액이 부족해요. (수수료 1%는 보낸 금액에서 차감돼요)", ja: "残高不足です。(手数料1%は送金額から差し引かれます)", en: "Insufficient balance. (1% fee is deducted from amount)" },
+  ghostswap_pair_missing: {
+    ko: "GhostSwap 페어가 설정되지 않았습니다. deploy-ghostswap.json 또는 GHOSTSWAP_PAIR_ADDRESS 를 확인하세요.",
+    ja: "GhostSwapペアが未設定です。deploy-ghostswap.json を確認してください。",
+    en: "GhostSwap pair not configured. Set deploy-ghostswap.json or GHOSTSWAP_PAIR_* env vars.",
+  },
+  ghostswap_sim_failed: { ko: "스왑 시뮬레이션 실패 (유동성 부족 등).", ja: "スワップシミュレーション失敗。", en: "Swap simulation failed (liquidity?)." },
   avatar_size: { ko: "프로필 이미지는 약 200KB 이하여야 해요.", ja: "プロフィール画像は約200KB以下にしてください。", en: "Profile image must be under ~200KB." },
   q_required: { ko: "q(검색어) 필요", ja: "q(検索語) が必要", en: "q required" },
   user_not_registered: { ko: "등록된 사용자를 찾을 수 없어요. @이름 검색은 상대가 이 봇을 한 번 실행했고 텔레그램 @유저네임이 있어야 해요. (뷰킹 키/뷰키 문제 아님)", ja: "ユーザーが見つかりません。@検索には相手がボットを起動済みで@usernameが必要です。（ビューイングキーとは無関係）", en: "User not found. For @username search, recipient must have started the bot and have a Telegram @username. (Not a viewing-key issue.)" },
@@ -589,7 +633,7 @@ const ERR = {
   recipient_must_be_secret: { ko: "수령인(recipient)이 secret1... 주소이거나 /link-secret 연동된 @사용자여야 합니다.", ja: "受取人(recipient)は secret1... アドレスまたは /link-secret 連携済みの @ユーザーである必要があります。", en: "Recipient must be secret1... address or @user linked via /link-secret." },
   recipient_telegram_unknown: { ko: "해당 텔레그램 숫자 ID는 아직 봇에 등록되지 않았어요. 상대가 /start 를 한 번 실행한 뒤 다시 시도해 주세요.", ja: "そのTelegram数字IDはまだボットに登録されていません。相手に /start を一度実行してもらってから再試行してください。", en: "That Telegram numeric ID is not registered yet. Ask them to run /start once, then try again." },
   recipient_no_secret_link: { ko: "수신자는 봇에 있지만 Secret 주소(/link-secret)가 없어요. 상대가 /link_secret 로 연동한 뒤 다시 시도해 주세요.", ja: "受信者は登録済みですが Secret アドレス(/link-secret)がありません。相手に /link_secret で連携してもらってから再試行してください。", en: "Recipient is registered but has no Secret address linked. They must run /link_secret first, then try again." },
-  chain_not_configured: { ko: "Real chain not configured. Set MOCK_AZTEC=1 or SECRET_NETWORK=1 with MNEMONIC.", ja: "チェーン未設定。MOCK_AZTEC=1 または SECRET_NETWORK=1 と MNEMONIC を設定してください。", en: "Real chain not configured. Set MOCK_AZTEC=1 or SECRET_NETWORK=1 with MNEMONIC." },
+  chain_not_configured: { ko: "체인 미설정. MOCK_AZTEC=1 또는 SECRET_NETWORK=1 및 Secret LCD/토큰 설정을 확인하세요.", ja: "チェーン未設定。MOCK_AZTEC=1 または SECRET_NETWORK=1 を確認してください。", en: "Chain not configured. Set MOCK_AZTEC=1 or SECRET_NETWORK=1 and Secret token/LCD config." },
   sender_wallet_required: { ko: "보내는 사람 지갑이 연결되지 않았어요. SNVR Messenger 설정에서 Keplr를 먼저 연결해 주세요.", ja: "送信者ウォレットが未連携です。SNVR Messenger の設定で Keplr を先に接続してください。", en: "Sender wallet is not connected. Connect Keplr first in SNVR Messenger settings." },
   recipient_wallet_required: { ko: "상대방 지갑이 연결되지 않았어요. 상대가 먼저 지갑을 연결해야 받아요.", ja: "受信者ウォレットが未連携です。相手が先にウォレット接続する必要があります。", en: "Recipient wallet is not connected yet. They must connect wallet first." },
   receive_code_wallet_required: { ko: "받기 코드는 지갑 연결된 계정만 발급할 수 있어요. 설정에서 Keplr를 연결해 주세요.", ja: "受取コードはウォレット連携済みアカウントのみ発行できます。設定で Keplr を接続してください。", en: "Receive code requires wallet connection. Connect Keplr in settings first." },
@@ -1039,7 +1083,6 @@ app.post("/wallet/send", async (req, res) => {
     if (!ot.wallet_linked) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "recipient_wallet_required") });
     toKey = platformKey(ot.platform, ot.platform_user_id);
     toWalletLinked = true;
-    oneTimeCodes.delete(to_one_time_code);
   } else if (to_platform_key && users.has(String(to_platform_key).trim())) {
     toKey = String(to_platform_key).trim();
   } else if (to_username) {
@@ -1081,35 +1124,34 @@ app.post("/wallet/send", async (req, res) => {
   if (spendable < numAmount) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "insufficient_balance") });
 
   const toSecretAddr = toU.secret_address ? String(toU.secret_address).trim() : "";
-  let chainTxHash = null;
-  let usedRelay = false;
-  // P2P 송금은 운영 지갑(MNEMONIC)에서 수령인 secret 주소로 SNIP-20 transfer — 보낸 사람 지갑 잔액은 체인상 안 줄어듦(relay_outstanding로 한도만 차감)
-  if (USE_SECRET && process.env.MNEMONIC && toSecretAddr && !MOCK) {
-    const amountRaw = String(Math.floor(numAmount * 1e9));
-    const result = await sendSnvr(toSecretAddr, amountRaw);
-    if (!result.ok) {
-      return res.status(400).json({
-        ok: false,
-        error: "on_chain_transfer_failed",
-        message: String(result.error || "SNVR on-chain transfer failed"),
-      });
-    }
-    chainTxHash = result.txHash || null;
-    fromU.relay_outstanding = getRelayOutstanding(fromU) + numAmount;
-    rememberChainBalance(fromU, effective);
-    usedRelay = true;
-  } else if (USE_SECRET && !process.env.MNEMONIC && !MOCK) {
-    return res.status(503).json({
-      ok: false,
-      error: "chain_transfer_unavailable",
-      message: "MNEMONIC is required on the server for on-chain SNVR transfers.",
+  const useClientSigning = USE_SECRET && !MOCK && Boolean(toSecretAddr);
+  if (useClientSigning) {
+    const deeplink = buildMessengerAppDeeplink(from_platform_user_id, "send", {
+      to: to_username || to_platform_key || (to_one_time_code ? String(to_one_time_code) : "") || String(to_platform_user_id ?? ""),
+      amount: String(numAmount),
+    });
+    return res.json({
+      ok: true,
+      requires_keplr: true,
+      recipient_secret: toSecretAddr,
+      amount: numAmount,
+      amount_raw: String(Math.floor(numAmount * 1e9)),
+      messenger_url: deeplink || undefined,
+      pending: {
+        to_key: toKey,
+        to_username: to_username || null,
+        to_platform_key: to_platform_key ? String(to_platform_key).trim() : null,
+        to_one_time_code: to_one_time_code ? String(to_one_time_code).trim() : null,
+        to_platform_user_id: to_platform_user_id != null ? String(to_platform_user_id) : null,
+      },
     });
   }
 
-  if (!usedRelay) {
-    fromU.balance = effective;
-    fromU.balance -= numAmount;
-  }
+  if (to_one_time_code) oneTimeCodes.delete(String(to_one_time_code).trim());
+
+  let chainTxHash = null;
+  fromU.balance = effective;
+  fromU.balance -= numAmount;
   toU.balance += numAmount;
   walletTxs.push({
     id: walletTxId++,
@@ -1147,14 +1189,145 @@ app.post("/wallet/send", async (req, res) => {
   chatMessages.push(sysMsg);
   const payload = {
     ok: true,
-    from_balance: spendableAfterRelay(fromU, effective),
+    from_balance: fromU.balance,
     to_balance: toU.balance,
     txHash: chainTxHash || undefined,
   };
-  if (usedRelay) {
-    payload.relay_mode = true;
-    payload.sender_chain_balance_unchanged = true;
+  if (toPlatform === "telegram") {
+    payload.recipient_telegram_id = toId;
+    payload.recipient_locale = lang;
   }
+  saveDb();
+  return res.json(payload);
+});
+
+/** Keplr SNIP-20 transfer 완료 후 알림·내부장부 반영 (운영지갑 미사용) */
+app.post("/wallet/send/ack", async (req, res) => {
+  const {
+    platform = "telegram",
+    from_platform_user_id,
+    amount,
+    tx_hash,
+    recipient_secret,
+    to_username,
+    to_platform_key,
+    to_one_time_code,
+    to_platform_user_id,
+    locale,
+    secret_address,
+    viewing_key,
+    permit: rawPermit,
+  } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
+  const txHash = String(tx_hash || "").trim();
+  if (!txHash) return res.status(400).json({ ok: false, error: "tx_hash required" });
+  if (amount == null || Number(amount) <= 0) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, null), "amount_required") });
+  }
+  const numAmount = Number(amount);
+  const fromKey = platformKey(platform, from_platform_user_id);
+  const fromU = ensureUser(platform, from_platform_user_id);
+  if (locale && ["en", "ko", "ja"].includes(String(locale).toLowerCase())) fromU.locale = String(locale).toLowerCase();
+  const senderLinked = await isWalletLinked(fromU, secret_address, viewing_key, permit);
+  if (!senderLinked) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "sender_wallet_required") });
+
+  if (walletTxs.some((t) => String(t.meta?.txHash || "") === txHash)) {
+    const v = walletBalanceView(fromU);
+    return res.json({ ok: true, duplicate: true, from_balance: v.immediate });
+  }
+
+  let toKey = null;
+  let toWalletLinked = false;
+  if (to_one_time_code) {
+    const ot = oneTimeCodes.get(String(to_one_time_code).trim());
+    if (!ot || Date.now() > new Date(ot.expires_at).getTime()) {
+      return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "invalid_receive_code") });
+    }
+    if (!ot.wallet_linked) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "recipient_wallet_required") });
+    toKey = platformKey(ot.platform, ot.platform_user_id);
+    toWalletLinked = true;
+    oneTimeCodes.delete(String(to_one_time_code).trim());
+  } else if (to_platform_key && users.has(String(to_platform_key).trim())) {
+    toKey = String(to_platform_key).trim();
+  } else if (to_username) {
+    const raw = String(to_username).replace(/^@/, "").trim();
+    if (/^\d{5,}$/.test(raw)) {
+      const k = platformKey(platform, raw);
+      if (!users.has(k)) {
+        return res.status(404).json({ ok: false, error: err(getLocale(req, fromKey), "recipient_telegram_unknown") });
+      }
+      toKey = k;
+    } else {
+      const uname = raw.toLowerCase();
+      for (const [k, v] of users) {
+        if (v.username && v.username.toLowerCase() === uname) {
+          toKey = k;
+          break;
+        }
+      }
+      if (!toKey) return res.status(404).json({ ok: false, error: userNotFound(getLocale(req, fromKey), to_username) });
+    }
+  } else if (to_platform_user_id != null) {
+    toKey = platformKey(platform, to_platform_user_id);
+  }
+  if (!toKey || toKey === fromKey) return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "specify_recipient") });
+  const [toPlatform, toId] = toKey.split(":");
+  const toU = ensureUser(toPlatform, toId);
+  if (!toWalletLinked && !(toU.secret_address && (toU.viewing_key || toU.permit))) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, fromKey), "recipient_wallet_required") });
+  }
+  const expectedRecv = toU.secret_address ? String(toU.secret_address).trim() : "";
+  if (!expectedRecv || String(recipient_secret || "").trim() !== expectedRecv) {
+    return res.status(400).json({ ok: false, error: "recipient_mismatch", message: "recipient_secret does not match resolved user." });
+  }
+
+  let effectiveAfter;
+  try {
+    effectiveAfter = secret_address && (viewing_key || permit)
+      ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+      : await getEffectiveBalance(fromU);
+  } catch (e) {
+    if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid" });
+    if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid" });
+    if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable" });
+    throw e;
+  }
+  rememberChainBalance(fromU, effectiveAfter);
+  toU.balance += numAmount;
+  walletTxs.push({
+    id: walletTxId++,
+    type: "send",
+    from_key: fromKey,
+    to_key: toKey,
+    amount: numAmount,
+    fee: 0,
+    meta: { to_username: to_username || null, to_one_time_code: to_one_time_code || null, txHash },
+    created_at: new Date().toISOString(),
+  });
+  const senderName = fromU?.display_name || (fromU?.username ? "@" + fromU.username : fromU?.platform_user_id || "Someone");
+  const recipientLocale = (toU?.locale || "en").toLowerCase().slice(0, 5);
+  const lang = ["ko", "ja"].includes(recipientLocale) ? recipientLocale : "en";
+  const notifyText = SEND_NOTIFY_MSG[lang](senderName, numAmount);
+  if (toPlatform === "telegram") {
+    await notifyTelegram(toId, notifyText);
+  }
+  const rid = roomId(fromKey, toKey);
+  if (!chatRooms.has(rid)) chatRooms.set(rid, { participants: [fromKey, toKey].sort(), created_at: new Date().toISOString(), auto_delete_after_sec: 0 });
+  chatMessages.push({
+    id: chatMessageId++,
+    room_id: rid,
+    from_key: "system",
+    text: notifyText,
+    meta: { type: "send", from_key: fromKey, to_key: toKey, amount: numAmount },
+    created_at: new Date().toISOString(),
+  });
+  const v = walletBalanceView(fromU);
+  const payload = {
+    ok: true,
+    from_balance: v.immediate,
+    to_balance: toU.balance,
+    txHash,
+  };
   if (toPlatform === "telegram") {
     payload.recipient_telegram_id = toId;
     payload.recipient_locale = lang;
@@ -1605,50 +1778,44 @@ app.post("/swap", async (req, res) => {
   const fromKey = from_platform_user_id != null ? platformKey(platform, from_platform_user_id) : null;
   const fromU = from_platform_user_id != null ? ensureUser(platform, from_platform_user_id) : null;
 
-  if (USE_SECRET && process.env.MNEMONIC) {
+  if (USE_SECRET && !MOCK) {
+    if (!isGhostswapPairConfigured()) {
+      return res.status(503).json({ ok: false, error: err(loc, "ghostswap_pair_missing") });
+    }
     const recRes = getRecipientSecretResolution(recipient, users);
     if (!recRes.ok) {
       return res.status(400).json({ ok: false, error: err(loc, recipientResolutionErrorKey(recRes.reason)) });
     }
     const toAddr = recRes.address;
-    let effective;
-      try {
-        effective = (secret_address && (viewing_key || permit))
-          ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
-          : (fromU ? await getEffectiveBalance(fromU) : 0);
-      } catch (e) {
-        if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
-        if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
-        if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
-        throw e;
-      }
-      if (!fromU || spendableAfterRelay(fromU, effective) < numAmount) {
-        return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_swap") });
-      }
-      const amountRaw = String(Math.floor(toReceive * 1e9));
-      const result = await sendSnvr(toAddr, amountRaw);
-      if (result.ok) {
-        fromU.relay_outstanding = getRelayOutstanding(fromU) + numAmount;
-        rememberChainBalance(fromU, effective);
-        const toKey = resolveRecipientToUserKey(recipient, platform);
-        if (toKey && toKey !== fromKey) {
-          const [p, id] = toKey.split(":");
-          ensureUser(p, id).balance += toReceive;
-          walletTxs.push({
-            id: walletTxId++,
-            type: "swap",
-            from_key: fromKey,
-            to_key: toKey,
-            amount: numAmount,
-            fee,
-            meta: { recipient, txHash: result.txHash },
-            created_at: new Date().toISOString(),
-          });
-        }
-        saveDb();
-        return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive, relay_mode: true });
-      }
-      return res.status(400).json({ ok: false, error: result.error });
+    const snvrOutRaw = Math.floor(toReceive * 1e9);
+    const rev = await ghostswapReverseSimulationSnvrOut(snvrOutRaw);
+    if (!rev.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: err(loc, "ghostswap_sim_failed"),
+        detail: rev.error || rev.error_code || "",
+      });
+    }
+    const c = loadConfig();
+    const deeplink = buildMessengerAppDeeplink(from_platform_user_id, "swap", { to: String(recipient), amount: String(numAmount) });
+    const minSnvr = String(Math.max(1, Math.floor(snvrOutRaw * 0.98)));
+    return res.json({
+      ok: true,
+      requires_keplr: true,
+      swap_kind: "amm_scrt_to_snvr",
+      pair_address: c.ghostswap_pair_address,
+      pair_code_hash: c.ghostswap_pair_code_hash,
+      native_denom: c.native_swap_denom || "uscrt",
+      offer_uscrt_amount: rev.offer_amount,
+      snvr_out_raw: String(snvrOutRaw),
+      min_snvr_return: minSnvr,
+      recipient_secret: toAddr,
+      amount_gross: numAmount,
+      fee,
+      to_receive: toReceive,
+      messenger_url: deeplink || undefined,
+      hint_ko: `GhostSwap AMM: Keplr에서 **SCRT(uscrt) ${Number(rev.offer_amount) / 1e6} SCRT 상당** 을 넣으면 수령인에게 약 ${toReceive} SNVR가 갑니다 (0.3% 앱 수수료 반영, 페어 수수료 별도).`,
+    });
   }
 
   if (from_platform_user_id != null) {
@@ -1694,6 +1861,87 @@ app.post("/swap", async (req, res) => {
   return res.status(501).json({ ok: false, error: err(loc, "chain_not_configured") });
 });
 
+/** GhostSwap: Keplr transfer(to_receive) 완료 후 장부·히스토리 */
+app.post("/swap/ack", async (req, res) => {
+  const {
+    platform = "telegram",
+    from_platform_user_id,
+    recipient,
+    amount: grossAmount,
+    to_receive: trIn,
+    fee: feeIn,
+    tx_hash,
+    recipient_secret,
+    swap_kind,
+    secret_address,
+    viewing_key,
+    permit: rawPermit,
+  } = req.body || {};
+  const permit = parsePermitInput(rawPermit);
+  const txHash = String(tx_hash || "").trim();
+  const loc = getLocale(req, from_platform_user_id != null ? platformKey(platform, from_platform_user_id) : null);
+  if (!txHash) return res.status(400).json({ ok: false, error: "tx_hash required" });
+  if (grossAmount == null || Number(grossAmount) <= 0 || !recipient) {
+    return res.status(400).json({ ok: false, error: err(loc, "amount_recipient_required") });
+  }
+  const numAmount = Number(grossAmount);
+  const fee = feeIn != null ? Number(feeIn) : numAmount * SWAP_FEE_RATE;
+  const toReceive = trIn != null ? Number(trIn) : numAmount - fee;
+  const fromKey = platformKey(platform, from_platform_user_id);
+  const fromU = ensureUser(platform, from_platform_user_id);
+  const senderLinked = await isWalletLinked(fromU, secret_address, viewing_key, permit);
+  if (!senderLinked) return res.status(400).json({ ok: false, error: err(loc, "sender_wallet_required") });
+
+  if (walletTxs.some((t) => String(t.meta?.txHash || "") === txHash)) {
+    const v = walletBalanceView(fromU);
+    return res.json({ ok: true, duplicate: true, from_balance: v.immediate });
+  }
+
+  const recRes = getRecipientSecretResolution(recipient, users);
+  if (!recRes.ok) return res.status(400).json({ ok: false, error: err(loc, recipientResolutionErrorKey(recRes.reason)) });
+  if (String(recipient_secret || "").trim() !== recRes.address) {
+    return res.status(400).json({ ok: false, error: "recipient_mismatch" });
+  }
+  const toKey = resolveRecipientToUserKey(recipient, platform);
+  if (!toKey || toKey === fromKey) return res.status(400).json({ ok: false, error: err(loc, "recipient_must_be_secret") });
+  const [p, id] = toKey.split(":");
+  const toU = ensureUser(p, id);
+
+  let effectiveAfter;
+  try {
+    effectiveAfter = secret_address && (viewing_key || permit)
+      ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+      : await getEffectiveBalance(fromU);
+  } catch (e) {
+    if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid" });
+    if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid" });
+    if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable" });
+    throw e;
+  }
+  rememberChainBalance(fromU, effectiveAfter);
+  toU.balance += toReceive;
+  walletTxs.push({
+    id: walletTxId++,
+    type: "swap",
+    from_key: fromKey,
+    to_key: toKey,
+    amount: numAmount,
+    fee,
+    meta: { recipient, txHash, swap_kind: swap_kind || "snvr_transfer" },
+    created_at: new Date().toISOString(),
+  });
+  saveDb();
+  const v = walletBalanceView(fromU);
+  return res.json({
+    ok: true,
+    from_balance: v.immediate,
+    fee,
+    to_receive: toReceive,
+    txHash,
+    swap_kind: swap_kind || undefined,
+  });
+});
+
 // POST /mix — Privacy Routing. 보낸 금액에서 수수료 1% 차감, 나머지가 수령인에게 입금
 app.post("/mix", async (req, res) => {
   const { amount, recipient, platform = "telegram", from_platform_user_id, secret_address, viewing_key, permit: rawPermit } = req.body || {};
@@ -1709,50 +1957,39 @@ app.post("/mix", async (req, res) => {
   const fromKey = from_platform_user_id != null ? platformKey(platform, from_platform_user_id) : null;
   const fromU = from_platform_user_id != null ? ensureUser(platform, from_platform_user_id) : null;
 
-  if (USE_SECRET && process.env.MNEMONIC) {
+  if (USE_SECRET && !MOCK) {
     const recRes = getRecipientSecretResolution(recipient, users);
     if (!recRes.ok) {
       return res.status(400).json({ ok: false, error: err(loc, recipientResolutionErrorKey(recRes.reason)) });
     }
-    const toAddr = recRes.address;
     let effective;
-      try {
-        effective = (secret_address && (viewing_key || permit))
-          ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
-          : (fromU ? await getEffectiveBalance(fromU) : 0);
-      } catch (e) {
-        if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
-        if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
-        if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
-        throw e;
-      }
-      if (!fromU || spendableAfterRelay(fromU, effective) < numAmount) {
-        return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
-      }
-      const amountRaw = String(Math.floor(toReceive * 1e9));
-      const result = await sendSnvr(toAddr, amountRaw);
-      if (result.ok) {
-        fromU.relay_outstanding = getRelayOutstanding(fromU) + numAmount;
-        rememberChainBalance(fromU, effective);
-        const toKey = resolveRecipientToUserKey(recipient, platform);
-        if (toKey && toKey !== fromKey) {
-          const [p, id] = toKey.split(":");
-          ensureUser(p, id).balance += toReceive;
-          walletTxs.push({
-            id: walletTxId++,
-            type: "mix",
-            from_key: fromKey,
-            to_key: toKey,
-            amount: numAmount,
-            fee,
-            meta: { recipient, txHash: result.txHash },
-            created_at: new Date().toISOString(),
-          });
-        }
-        saveDb();
-        return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive, relay_mode: true });
-      }
-      return res.status(400).json({ ok: false, error: result.error });
+    try {
+      effective = (secret_address && (viewing_key || permit))
+        ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
+        : (fromU ? await getEffectiveBalance(fromU) : 0);
+    } catch (e) {
+      if (e?.message === "PERMIT_INVALID") return res.status(400).json({ ok: false, error: "permit_invalid", message: "Permit이 만료되었거나 유효하지 않습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      if (e?.message === "VIEWING_KEY_INVALID") return res.status(400).json({ ok: false, error: "viewing_key_invalid", message: "뷰키가 만료되었거나 변경되었습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      if (e?.message === "CHAIN_BALANCE_UNAVAILABLE") return res.status(400).json({ ok: false, error: "chain_balance_unavailable", message: "체인 잔액을 조회할 수 없습니다. 설정에서 Keplr를 다시 연결해 주세요." });
+      throw e;
+    }
+    if (!fromU || spendableAfterRelay(fromU, effective) < numAmount) {
+      return res.status(400).json({ ok: false, error: err(loc, "insufficient_balance_mix") });
+    }
+    const poolUrl = buildMessengerPrivacyRoutingUrl(from_platform_user_id, {
+      pool_amount: String(numAmount),
+      pool_to: String(recipient).replace(/^@/, ""),
+      pool_action: "deposit",
+    });
+    const simpleUrl = buildMessengerAppDeeplink(from_platform_user_id, "mix", { to: String(recipient), amount: String(numAmount) });
+    return res.json({
+      ok: true,
+      requires_keplr: true,
+      messenger_url: poolUrl || simpleUrl || undefined,
+      fee,
+      to_receive: toReceive,
+      message_ko: "프라이버시 라우팅은 메신저에서 Keplr로 믹서 입금·클레임을 진행해 주세요.",
+    });
   }
 
   if (from_platform_user_id != null) {
