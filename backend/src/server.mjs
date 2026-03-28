@@ -218,6 +218,101 @@ app.get("/routing/telegram-summary", async (req, res) => {
   }
 });
 
+/** 릴레이 풀 티켓 목록 (메신저 bot API — 경로는 MESSENGER_RELAY_TICKETS_PATH 로 교체 가능) */
+app.get("/routing/telegram-tickets", async (req, res) => {
+  const platform_user_id = req.query.platform_user_id;
+  if (!platform_user_id) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  }
+  const openUrl = buildMessengerPrivacyRoutingUrl(platform_user_id);
+  const upstream = String(process.env.MESSENGER_RELAY_API_URL || "").trim().replace(/\/$/, "");
+  const upPath = String(process.env.MESSENGER_RELAY_TICKETS_PATH || "/api/bot/routing/tickets").trim();
+  const pathJoin = upPath.startsWith("/") ? upPath : "/" + upPath;
+  if (!upstream) {
+    return res.json({
+      ok: true,
+      mode: "deeplink_only",
+      open_url: openUrl || null,
+      hint: "MESSENGER_RELAY_API_URL not set",
+      tickets: [],
+    });
+  }
+  const token = String(process.env.MESSENGER_RELAY_API_TOKEN || "").trim();
+  const u = new URL(upstream.replace(/\/$/, "") + pathJoin);
+  u.searchParams.set("telegram_user_id", String(platform_user_id));
+  try {
+    const r = await fetch(u.toString(), {
+      headers: token ? { Authorization: "Bearer " + token } : {},
+      signal: AbortSignal.timeout(Math.min(30000, Number(process.env.MESSENGER_RELAY_FETCH_MS) || 25000)),
+    });
+    const data = await r.json().catch(() => ({}));
+    return res.status(r.ok ? 200 : 502).json({
+      ok: r.ok,
+      mode: "relay",
+      upstream_status: r.status,
+      relay: data,
+      open_url: openUrl || null,
+    });
+  } catch (e) {
+    return res.status(502).json({
+      ok: false,
+      error: String(e?.message || e),
+      open_url: openUrl || null,
+    });
+  }
+});
+
+/** 클레임(출금) 힌트 — Keplr 필요 시 URL 반환 등. body: platform_user_id, ticket_id?, index? */
+app.post("/routing/telegram-claim-hint", async (req, res) => {
+  const { platform_user_id, ticket_id, index } = req.body || {};
+  if (!platform_user_id) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  }
+  const openUrl = buildMessengerPrivacyRoutingUrl(platform_user_id);
+  const upstream = String(process.env.MESSENGER_RELAY_API_URL || "").trim().replace(/\/$/, "");
+  const upPath = String(process.env.MESSENGER_RELAY_CLAIM_HINT_PATH || "/api/bot/routing/claim-hint").trim();
+  const pathJoin = upPath.startsWith("/") ? upPath : "/" + upPath;
+  if (!upstream) {
+    return res.status(503).json({
+      ok: false,
+      error: "relay_not_configured",
+      open_url: openUrl || null,
+      hint: "MESSENGER_RELAY_API_URL not set",
+    });
+  }
+  const token = String(process.env.MESSENGER_RELAY_API_TOKEN || "").trim();
+  const url = upstream.replace(/\/$/, "") + pathJoin;
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+      body: JSON.stringify({
+        telegram_user_id: String(platform_user_id),
+        ...(ticket_id != null && ticket_id !== "" ? { ticket_id: String(ticket_id) } : {}),
+        ...(index != null && index !== "" && Number.isFinite(Number(index)) ? { index: Number(index) } : {}),
+      }),
+      signal: AbortSignal.timeout(Math.min(30000, Number(process.env.MESSENGER_RELAY_FETCH_MS) || 25000)),
+    });
+    const data = await r.json().catch(() => ({}));
+    return res.status(r.ok ? 200 : 502).json({
+      ok: r.ok,
+      mode: "relay",
+      upstream_status: r.status,
+      relay: data,
+      open_url: openUrl || null,
+    });
+  } catch (e) {
+    return res.status(502).json({
+      ok: false,
+      error: String(e?.message || e),
+      open_url: openUrl || null,
+    });
+  }
+});
+
 
 // Debug helper: run permit probe once and return reason.
 // This avoids "pending_chain" ambiguity and lets us see PERMIT_INVALID vs LCD timeout quickly.
@@ -905,11 +1000,20 @@ app.post("/wallet/send", async (req, res) => {
   } else if (to_platform_key && users.has(String(to_platform_key).trim())) {
     toKey = String(to_platform_key).trim();
   } else if (to_username) {
-    const uname = String(to_username).replace(/^@/, "").toLowerCase();
-    for (const [k, v] of users) {
-      if (v.username && v.username.toLowerCase() === uname) { toKey = k; break; }
+    const raw = String(to_username).replace(/^@/, "").trim();
+    if (/^\d{5,}$/.test(raw)) {
+      const k = platformKey(platform, raw);
+      if (!users.has(k)) {
+        return res.status(404).json({ ok: false, error: err(getLocale(req, fromKey), "recipient_telegram_unknown") });
+      }
+      toKey = k;
+    } else {
+      const uname = raw.toLowerCase();
+      for (const [k, v] of users) {
+        if (v.username && v.username.toLowerCase() === uname) { toKey = k; break; }
+      }
+      if (!toKey) return res.status(404).json({ ok: false, error: userNotFound(getLocale(req, fromKey), to_username) });
     }
-    if (!toKey) return res.status(404).json({ ok: false, error: userNotFound(getLocale(req, fromKey), to_username) });
   } else if (to_platform_user_id != null) {
     toKey = platformKey(platform, to_platform_user_id);
   }
@@ -1007,8 +1111,8 @@ app.post("/wallet/link-secret", (req, res) => {
   if (!platform_user_id || !secret_address) {
     return res.status(400).json({ ok: false, error: "platform_user_id, secret_address required" });
   }
-  if (!permit) {
-    return res.status(400).json({ ok: false, error: "permit required" });
+  if (!permit && !vk) {
+    return res.status(400).json({ ok: false, error: "permit or viewing_key required" });
   }
   const u = ensureUser(platform, platform_user_id);
   u.secret_address = String(secret_address).trim();
@@ -1402,7 +1506,9 @@ const MIX_FEE_RATE = 0.01;    // 1% (0.5% 소각 + 0.5% 운영)
 function resolveRecipientToUserKey(recipient, platform = "telegram") {
   const r = String(recipient || "").trim();
   if (r.startsWith("@")) {
-    const uname = r.slice(1).toLowerCase();
+    const rest = r.slice(1);
+    if (/^\d{5,}$/.test(rest)) return platform + ":" + rest;
+    const uname = rest.toLowerCase();
     for (const [k, v] of users) {
       if (v.username && v.username.toLowerCase() === uname) return k;
     }
