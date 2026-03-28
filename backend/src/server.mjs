@@ -18,6 +18,12 @@ import {
   isSecretEnabled,
   loadConfig,
 } from "./secret.mjs";
+import {
+  isPgUsersEnabled,
+  initPgUsers,
+  hydrateUsersFromPostgres,
+  scheduleSyncUsersToPostgres,
+} from "./pg_users.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = String(process.env.DB_PATH || join(__dirname, "../data/db.json"));
@@ -144,6 +150,75 @@ app.get("/wallet/chain-config", (req, res) => {
   }
 });
 
+
+/** SNVR Messenger */
+function buildMessengerPrivacyRoutingUrl(platformUserId) {
+  const base = String(process.env.MESSENGER_URL || "").trim().replace(/\/$/, "");
+  if (!base) return "";
+  const routePath = String(process.env.MESSENGER_PRIVACY_ROUTING_PATH || "/wallet").trim();
+  const pfx = routePath.startsWith("/") ? routePath : "/" + routePath;
+  let url = base + pfx;
+  if (platformUserId) {
+    const q = new URLSearchParams();
+    q.set("telegram_user_id", String(platformUserId));
+    url += (url.includes("?") ? "&" : "?") + q.toString();
+  }
+  return url;
+}
+
+app.get("/routing/telegram-deeplink", (req, res) => {
+  const platform_user_id = req.query.platform_user_id;
+  if (!platform_user_id) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  }
+  const url = buildMessengerPrivacyRoutingUrl(platform_user_id);
+  if (!url) return res.status(503).json({ ok: false, error: "messenger_url_not_configured" });
+  return res.json({ ok: true, url });
+});
+
+app.get("/routing/telegram-summary", async (req, res) => {
+  const platform_user_id = req.query.platform_user_id;
+  if (!platform_user_id) {
+    return res.status(400).json({ ok: false, error: err(getLocale(req, null), "platform_user_id_required") });
+  }
+  const openUrl = buildMessengerPrivacyRoutingUrl(platform_user_id);
+  const upstream = String(process.env.MESSENGER_RELAY_API_URL || "").trim().replace(/\/$/, "");
+  const upPath = String(process.env.MESSENGER_RELAY_SUMMARY_PATH || "/api/bot/routing/summary").trim();
+  const pathJoin = upPath.startsWith("/") ? upPath : "/" + upPath;
+  if (!upstream) {
+    return res.json({
+      ok: true,
+      mode: "deeplink_only",
+      open_url: openUrl || null,
+      hint: "MESSENGER_RELAY_API_URL not set",
+    });
+  }
+  const token = String(process.env.MESSENGER_RELAY_API_TOKEN || "").trim();
+  const u = new URL(upstream.replace(/\/$/, "") + pathJoin);
+  u.searchParams.set("telegram_user_id", String(platform_user_id));
+  try {
+    const r = await fetch(u.toString(), {
+      headers: token ? { Authorization: "Bearer " + token } : {},
+      signal: AbortSignal.timeout(Math.min(30000, Number(process.env.MESSENGER_RELAY_FETCH_MS) || 25000)),
+    });
+    const data = await r.json().catch(() => ({}));
+    return res.status(r.ok ? 200 : 502).json({
+      ok: r.ok,
+      mode: "relay",
+      upstream_status: r.status,
+      relay: data,
+      open_url: openUrl || null,
+    });
+  } catch (e) {
+    return res.status(502).json({
+      ok: false,
+      error: String(e?.message || e),
+      open_url: openUrl || null,
+    });
+  }
+});
+
+
 // Debug helper: run permit probe once and return reason.
 // This avoids "pending_chain" ambiguity and lets us see PERMIT_INVALID vs LCD timeout quickly.
 app.get("/wallet/permit-probe", async (req, res) => {
@@ -202,6 +277,25 @@ let chatMessageId = 1;
 // ZERO_LOG=1 이면 채팅·전송내역 미저장 (텔레그램도 재시작 시 초기화). 기본값 0(저장).
 const ZERO_LOG = process.env.ZERO_LOG === "1";
 
+/** 메모리(및 ZERO_LOG=0 일 때 디스크)의 walletTxs에서 오래된 행 제거. 밀리초. 0이면 TTL 비활성(세션 동안 유지). 기본 30분. */
+const WALLET_TX_RETENTION_MS = (() => {
+  const raw = process.env.WALLET_TX_RETENTION_MS;
+  if (raw === undefined || String(raw).trim() === "") return 30 * 60 * 1000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 30 * 60 * 1000;
+  return n;
+})();
+
+function pruneWalletTxsByAge() {
+  if (WALLET_TX_RETENTION_MS === 0) return;
+  const cutoff = Date.now() - WALLET_TX_RETENTION_MS;
+  for (let i = walletTxs.length - 1; i >= 0; i--) {
+    const tx = walletTxs[i];
+    const t = new Date(tx?.created_at || 0).getTime();
+    if (!Number.isFinite(t) || t < cutoff) walletTxs.splice(i, 1);
+  }
+}
+
 function loadDb() {
   if (!existsSync(DB_PATH)) return;
   try {
@@ -213,6 +307,7 @@ function loadDb() {
     if (!ZERO_LOG && db.chatRooms) chatRooms = new Map(Object.entries(db.chatRooms));
     if (!ZERO_LOG && Array.isArray(db.chatMessages)) chatMessages = db.chatMessages;
     if (db.chatMessageId != null) chatMessageId = db.chatMessageId;
+    pruneWalletTxsByAge();
     console.log("DB loaded:", users.size, "users", ZERO_LOG ? "(Zero-Log: no chain link, no chat/tx history)" : "");
   } catch (e) {
     console.warn("DB load failed:", e?.message);
@@ -221,6 +316,7 @@ function loadDb() {
 
 function saveDb() {
   try {
+    pruneWalletTxsByAge();
     mkdirSync(dirname(DB_PATH), { recursive: true });
     const db = {
       users: Object.fromEntries(users),
@@ -233,12 +329,12 @@ function saveDb() {
       db.chatMessages = chatMessages;
     }
     writeFileSync(DB_PATH, JSON.stringify(db, null, 0), "utf8");
+    if (isPgUsersEnabled()) scheduleSyncUsersToPostgres(users);
   } catch (e) {
     console.warn("DB save failed:", e?.message);
   }
 }
 
-loadDb();
 function roomId(key1, key2) {
   return [key1, key2].sort().join("::");
 }
@@ -1551,21 +1647,35 @@ app.post("/wallet/faucet", (req, res) => {
   return res.json({ ok: true, balance: u.balance, added: add });
 });
 
-app.listen(PORT, () => {
-  console.log(`Snvr backend on http://localhost:${PORT} (mock=${MOCK}, secret=${USE_SECRET})`);
-  try {
-    const c = loadConfig();
-    if (process.env.SECRET_NETWORK === "1") {
-      if (c?.snvr_token && c?.snvr_code_hash) {
-        console.log("  [SNVR] 컨트랙트 로드됨:", String(c.snvr_token).slice(0, 16) + "…");
-      } else {
-        console.warn("  [SNVR] 컨트랙트 없음 → deploy-full 경로 확인 또는 Railway에 SNVR_TOKEN / SNVR_CODE_HASH 설정");
-      }
+async function startServer() {
+  loadDb();
+  if (isPgUsersEnabled()) {
+    try {
+      await initPgUsers();
+      const h = await hydrateUsersFromPostgres(users);
+      console.log("[pg_users]", h.source, h.count);
+    } catch (e) {
+      console.error("[pg_users] startup failed — continuing with file-only users:", e?.message || e);
     }
-    if (GW_URL_CONFIGURED) console.log("  [Gateway]", (process.env.QUERY_GATEWAY_URL || "").trim());
-  } catch (_e) {
-    /* ignore */
   }
-  if (TELEGRAM_BOT_TOKEN) console.log("  [송금알림] 텔레그램 봇 토큰 로드됨 → 입금 시 텔레그램 알림 전송 가능");
-  else console.warn("  [송금알림] TELEGRAM_BOT_TOKEN 없음 → backend/.env 또는 telegram-bot/.env의 BOT_TOKEN 필요");
-});
+  app.listen(PORT, () => {
+    console.log(`Snvr backend on http://localhost:${PORT} (mock=${MOCK}, secret=${USE_SECRET})`);
+    try {
+      const c = loadConfig();
+      if (process.env.SECRET_NETWORK === "1") {
+        if (c?.snvr_token && c?.snvr_code_hash) {
+          console.log("  [SNVR] 컨트랙트 로드됨:", String(c.snvr_token).slice(0, 16) + "…");
+        } else {
+          console.warn("  [SNVR] 컨트랙트 없음 → deploy-full 경로 확인 또는 Railway에 SNVR_TOKEN / SNVR_CODE_HASH 설정");
+        }
+      }
+      if (GW_URL_CONFIGURED) console.log("  [Gateway]", (process.env.QUERY_GATEWAY_URL || "").trim());
+    } catch (_e) {
+      /* ignore */
+    }
+    if (TELEGRAM_BOT_TOKEN) console.log("  [송금알림] 텔레그램 봇 토큰 로드됨 → 입금 시 텔레그램 알림 전송 가능");
+    else console.warn("  [송금알림] TELEGRAM_BOT_TOKEN 없음 → backend/.env 또는 telegram-bot/.env의 BOT_TOKEN 필요");
+    if (isPgUsersEnabled()) console.log("  [pg_users] DATABASE_URL active → users table sync");
+  });
+}
+startServer();
