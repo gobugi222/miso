@@ -89,14 +89,32 @@ async function notifyTelegram(chatId, text) {
   }
 }
 
-// 연결 확인 (404 나올 때 메신저에서 "백엔드 주소 확인" 안내용)
-app.get("/health", (req, res) =>
-  res.json({
+// 연결 확인 (404 나올 때 메신저에서 "백엔드 주소 확인" 안내용). 스케일/장애 대응용 메타만 노출(민감값 없음).
+app.get("/health", (req, res) => {
+  let lcdHost = null;
+  try {
+    const c = loadConfig();
+    const raw = String(process.env.LCD_URL || c.lcd_url || "").trim().replace(/\/$/, "");
+    if (raw) {
+      try {
+        lcdHost = new URL(raw.startsWith("http") ? raw : "https://" + raw).hostname;
+      } catch (_e) {
+        lcdHost = raw.replace(/^https:\/\//, "").split("/")[0] || null;
+      }
+    }
+  } catch (_e2) {
+    lcdHost = null;
+  }
+  return res.json({
     ok: true,
     service: "snvr-backend",
     build: process.env.BUILD_ID || null,
-  })
-);
+    mock: MOCK,
+    secret_network: USE_SECRET,
+    lcd_host: lcdHost,
+    query_gateway_configured: GW_URL_CONFIGURED,
+  });
+});
 
 // 체인 설정 (Keplr 연결용. 메인넷 배포 후 사용)
 app.get("/wallet/chain-config", (req, res) => {
@@ -1532,9 +1550,6 @@ app.post("/wallet/faucet", (req, res) => {
   saveDb();
   return res.json({ ok: true, balance: u.balance, added: add });
 });
-
-// Health
-app.get("/health", (_, res) => res.json({ ok: true, mock: MOCK }));
 
 app.listen(PORT, () => {
   console.log(`Snvr backend on http://localhost:${PORT} (mock=${MOCK}, secret=${USE_SECRET})`);
