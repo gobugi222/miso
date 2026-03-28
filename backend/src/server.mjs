@@ -14,6 +14,7 @@ import {
   getSnvrBalanceWithPermitProbe,
   sendSnvr,
   resolveRecipientToSecretAddress,
+  getRecipientSecretResolution,
   isSecretEnabled,
   loadConfig,
 } from "./secret.mjs";
@@ -339,6 +340,8 @@ const ERR = {
   message_not_found: { ko: "Message not found or not yours", ja: "メッセージが見つからないか、あなたのものではありません", en: "Message not found or not yours" },
   amount_recipient_required: { ko: "amount(양수), recipient 필요", ja: "amount(正の数), recipient が必要", en: "amount (positive), recipient required" },
   recipient_must_be_secret: { ko: "수령인(recipient)이 secret1... 주소이거나 /link-secret 연동된 @사용자여야 합니다.", ja: "受取人(recipient)は secret1... アドレスまたは /link-secret 連携済みの @ユーザーである必要があります。", en: "Recipient must be secret1... address or @user linked via /link-secret." },
+  recipient_telegram_unknown: { ko: "해당 텔레그램 숫자 ID는 아직 봇에 등록되지 않았어요. 상대가 /start 를 한 번 실행한 뒤 다시 시도해 주세요.", ja: "そのTelegram数字IDはまだボットに登録されていません。相手に /start を一度実行してもらってから再試行してください。", en: "That Telegram numeric ID is not registered yet. Ask them to run /start once, then try again." },
+  recipient_no_secret_link: { ko: "수신자는 봇에 있지만 Secret 주소(/link-secret)가 없어요. 상대가 /link_secret 로 연동한 뒤 다시 시도해 주세요.", ja: "受信者は登録済みですが Secret アドレス(/link-secret)がありません。相手に /link_secret で連携してもらってから再試行してください。", en: "Recipient is registered but has no Secret address linked. They must run /link_secret first, then try again." },
   chain_not_configured: { ko: "Real chain not configured. Set MOCK_AZTEC=1 or SECRET_NETWORK=1 with MNEMONIC.", ja: "チェーン未設定。MOCK_AZTEC=1 または SECRET_NETWORK=1 と MNEMONIC を設定してください。", en: "Real chain not configured. Set MOCK_AZTEC=1 or SECRET_NETWORK=1 with MNEMONIC." },
   sender_wallet_required: { ko: "보내는 사람 지갑이 연결되지 않았어요. SNVR Messenger 설정에서 Keplr를 먼저 연결해 주세요.", ja: "送信者ウォレットが未連携です。SNVR Messenger の設定で Keplr を先に接続してください。", en: "Sender wallet is not connected. Connect Keplr first in SNVR Messenger settings." },
   recipient_wallet_required: { ko: "상대방 지갑이 연결되지 않았어요. 상대가 먼저 지갑을 연결해야 받아요.", ja: "受信者ウォレットが未連携です。相手が先にウォレット接続する必要があります。", en: "Recipient wallet is not connected yet. They must connect wallet first." },
@@ -1294,9 +1297,15 @@ function resolveRecipientToUserKey(recipient, platform = "telegram") {
     for (const [k, v] of users) {
       if (v.username && v.username.toLowerCase() === uname) return k;
     }
-    if (/^\d+$/.test(r)) return platform + ":" + r;
+    if (/^\d{5,}$/.test(r)) return platform + ":" + r;
   }
   return null; // 체인 주소 등
+}
+
+function recipientResolutionErrorKey(reason) {
+  if (reason === "telegram_unknown") return "recipient_telegram_unknown";
+  if (reason === "no_secret") return "recipient_no_secret_link";
+  return "recipient_must_be_secret";
 }
 
 // POST /swap — 고스트스왑. 보낸 금액에서 수수료 0.3% 차감, 나머지가 수령인에게 입금
@@ -1315,9 +1324,12 @@ app.post("/swap", async (req, res) => {
   const fromU = from_platform_user_id != null ? ensureUser(platform, from_platform_user_id) : null;
 
   if (USE_SECRET && process.env.MNEMONIC) {
-    const toAddr = resolveRecipientToSecretAddress(recipient, users);
-    if (toAddr) {
-      let effective;
+    const recRes = getRecipientSecretResolution(recipient, users);
+    if (!recRes.ok) {
+      return res.status(400).json({ ok: false, error: err(loc, recipientResolutionErrorKey(recRes.reason)) });
+    }
+    const toAddr = recRes.address;
+    let effective;
       try {
         effective = (secret_address && (viewing_key || permit))
           ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
@@ -1353,7 +1365,6 @@ app.post("/swap", async (req, res) => {
         return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive });
       }
       return res.status(400).json({ ok: false, error: result.error });
-    }
   }
 
   if (from_platform_user_id != null) {
@@ -1415,9 +1426,12 @@ app.post("/mix", async (req, res) => {
   const fromU = from_platform_user_id != null ? ensureUser(platform, from_platform_user_id) : null;
 
   if (USE_SECRET && process.env.MNEMONIC) {
-    const toAddr = resolveRecipientToSecretAddress(recipient, users);
-    if (toAddr) {
-      let effective;
+    const recRes = getRecipientSecretResolution(recipient, users);
+    if (!recRes.ok) {
+      return res.status(400).json({ ok: false, error: err(loc, recipientResolutionErrorKey(recRes.reason)) });
+    }
+    const toAddr = recRes.address;
+    let effective;
       try {
         effective = (secret_address && (viewing_key || permit))
           ? await getEffectiveBalanceFromCreds(secret_address, viewing_key, permit, fromU)
@@ -1453,7 +1467,6 @@ app.post("/mix", async (req, res) => {
         return res.json({ ok: true, txHash: result.txHash, fee, to_receive: toReceive });
       }
       return res.status(400).json({ ok: false, error: result.error });
-    }
   }
 
   if (from_platform_user_id != null) {

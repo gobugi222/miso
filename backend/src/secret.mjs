@@ -434,12 +434,27 @@ export async function mixerWithdraw(recipientAddress, amountRaw) {
 
 /** 수령인 해석: @username -> user_key -> secret_address, 또는 secret1... 직접 */
 export function resolveRecipientToSecretAddress(recipient, users) {
+  const res = getRecipientSecretResolution(recipient, users);
+  return res.ok ? res.address : null;
+}
+
+/**
+ * Swap/Mix 수령인 해석 + 실패 이유(봇 메시지용).
+ * 숫자만 입력 시 텔레그램 user id로 간주 (일반적으로 5자리 이상).
+ */
+export function getRecipientSecretResolution(recipient, users) {
   const r = String(recipient || "").trim();
-  if (r.startsWith("secret1")) return r;
+  if (!r) return { ok: false, reason: "empty" };
+  if (r.startsWith("secret1")) return { ok: true, address: r };
   const toKey = resolveRecipientToUserKey(recipient, users);
-  if (!toKey) return null;
+  if (!toKey) return { ok: false, reason: "unresolved" };
   const u = users.get(toKey);
-  return u?.secret_address || null;
+  if (!u) {
+    if (/^\d{5,}$/.test(r)) return { ok: false, reason: "telegram_unknown" };
+    return { ok: false, reason: "unresolved" };
+  }
+  if (!u.secret_address) return { ok: false, reason: "no_secret" };
+  return { ok: true, address: u.secret_address };
 }
 
 function resolveRecipientToUserKey(recipient, users) {
@@ -449,12 +464,13 @@ function resolveRecipientToUserKey(recipient, users) {
     for (const [k, v] of users) {
       if (v.username && v.username.toLowerCase() === uname) return k;
     }
+    return null;
   } else if (!r.startsWith("0x") && !r.includes("0x") && !r.startsWith("secret1")) {
     const uname = r.toLowerCase();
     for (const [k, v] of users) {
       if (v.username && v.username.toLowerCase() === uname) return k;
     }
-    if (/^\d+$/.test(r) && users.has("telegram:" + r)) return "telegram:" + r;
+    if (/^\d{5,}$/.test(r)) return "telegram:" + r;
   }
   return null;
 }
