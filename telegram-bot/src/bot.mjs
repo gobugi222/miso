@@ -530,6 +530,65 @@ bot.command("route", async (ctx) => {
   }
 });
 
+
+const POOL_MSG = {
+  ko: {
+    noBackend: "BACKEND_URL이 필요해요.",
+    noConnect: "백엔드에 연결할 수 없어요.",
+    noMessenger: "백엔드에 MESSENGER_URL을 설정해 주세요 (Railway).",
+    web: (u) => "🔗 프라이버시 라우팅(릴레이 풀)\n" + u + "\n\n브라우저에서 Keplr로 입금·클레임",
+    statusWebOnly: (u) => "📋 티켓 API 미연동 — 웹에서 확인:\n" + u,
+    statusRelay: (x) => "📋 요약:\n" + x,
+    statusFail: (e) => "오류: " + e,
+    help:
+      "/pool web — 메신저 풀 화면 링크\n" +
+      "/pool status — 티켓 요약(API 연동 시)\n" +
+      "/pool help\n" +
+      "※ /route 는 백엔드 직송(1%). 풀은 /pool web",
+  },
+  ja: { noBackend: "BACKEND_URL", noConnect: "NG", noMessenger: "MESSENGER_URL", web: (u) => u, statusWebOnly: (u) => u, statusRelay: (x) => x, statusFail: (e) => String(e), help: "/pool web | status | help" },
+  en: { noBackend: "Set BACKEND_URL", noConnect: "Cannot connect", noMessenger: "Set MESSENGER_URL on backend", web: (u) => "Open:\n" + u, statusWebOnly: (u) => "Open:\n" + u, statusRelay: (x) => x, statusFail: (e) => String(e), help: "/pool web | /pool status | /pool help" },
+};
+bot.command("pool", async (ctx) => {
+  try {
+    const lang = getLang(ctx);
+    const m = POOL_MSG[lang] || POOL_MSG.en;
+    if (!BACKEND_URL) return ctx.reply(m.noBackend);
+    const parts = (ctx.message?.text || "").trim().split(/\s+/).slice(1);
+    const sub = (parts[0] || "help").toLowerCase();
+    const uid = getUserId(ctx);
+    if (sub === "help" || sub === "?") return ctx.reply(m.help);
+    if (sub === "web" || sub === "link" || sub === "open") {
+      const res = await callBackendGet("/routing/telegram-deeplink?platform_user_id=" + encodeURIComponent(uid), BACKEND_FETCH_TIMEOUT_MS);
+      if (res === null) return ctx.reply(m.noConnect);
+      if (!res.ok || !res.data?.ok) {
+        const err = res.data?.error || res.data?.message || "err";
+        if (String(err).includes("messenger_url")) return ctx.reply(m.noMessenger);
+        return ctx.reply(m.statusFail(err));
+      }
+      return ctx.reply(m.web(res.data.url));
+    }
+    if (sub === "status") {
+      const res = await callBackendGet("/routing/telegram-summary?platform_user_id=" + encodeURIComponent(uid), BACKEND_FETCH_TIMEOUT_MS);
+      if (res === null) return ctx.reply(m.noConnect);
+      const d = res.data || {};
+      if (d.mode === "deeplink_only" && d.open_url) return ctx.reply(m.statusWebOnly(d.open_url));
+      if (d.mode === "relay" && d.relay != null) {
+        let t;
+        try { t = JSON.stringify(d.relay, null, 2); } catch (_e) { t = String(d.relay); }
+        if (t.length > 3500) t = t.slice(0, 3497) + "...";
+        const tail = d.open_url ? "\n\n" + d.open_url : "";
+        return ctx.reply(m.statusRelay(t) + tail);
+      }
+      if (d.open_url) return ctx.reply(m.statusWebOnly(d.open_url));
+      return ctx.reply(m.statusFail(d.error || JSON.stringify(d)));
+    }
+    return ctx.reply(m.help);
+  } catch (err) {
+    const m = POOL_MSG[getLang(ctx)] || POOL_MSG.en;
+    return ctx.reply(m.statusFail(err?.message || err));
+  }
+});
 /** 지갑·채팅 메시지 — 나라별 번역 */
 const WALLET_MSG = {
   ko: {
